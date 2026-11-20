@@ -422,7 +422,7 @@ pub struct WriteReceipt {
     pub replayed: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct StoredReceipt {
     pub request_hash_version: u32,
     pub request_hash: [u8; 32],
@@ -443,6 +443,20 @@ pub(crate) fn decode<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<T, 
 pub(crate) fn validate_existing(
     tx: &ReadTransaction,
 ) -> Result<Option<ControlState>, StorageError> {
+    Ok(validate_existing_with_schema(tx)?.0)
+}
+
+/// `validate_existing` plus the canonical schema it already validated in this
+/// transaction. Callers needing both must not run `read_state` a second time.
+pub(crate) fn validate_existing_with_schema(
+    tx: &ReadTransaction,
+) -> Result<
+    (
+        Option<ControlState>,
+        Option<super::canonical_schema::CanonicalSchemaState>,
+    ),
+    StorageError,
+> {
     #[cfg(test)]
     VALIDATION_WORK.with(|work| {
         let mut count = work.get();
@@ -473,7 +487,7 @@ pub(crate) fn validate_existing(
         }
         super::metadata::purge::validate_existing(tx, None)?;
         super::metadata::batch::validate_existing(tx, None)?;
-        return Ok(None);
+        return Ok((None, None));
     }
     if !present.iter().all(|p| *p) {
         return Err(StorageError::InvalidControl(
@@ -496,7 +510,7 @@ pub(crate) fn validate_existing(
     )?;
     let ancestry = super::lineage::read_lineage(tx, &state)?;
     super::lineage::validate_text_anchor(tx, &state, ancestry.as_ref())?;
-    super::canonical_schema::read_state(tx, &state)?;
+    let schema = super::canonical_schema::read_state(tx, &state)?;
     for entry in receipts.iter()? {
         let (key, value) = entry?;
         let (lineage, scope, operation) = decode_scope(key.value())?;
@@ -631,7 +645,7 @@ pub(crate) fn validate_existing(
     }
     super::metadata::purge::validate_existing(tx, Some(&state))?;
     super::metadata::batch::validate_existing(tx, Some(&state))?;
-    Ok(Some(state))
+    Ok((Some(state), schema))
 }
 
 fn decode_scope(key: &[u8]) -> Result<(Uuid, MutationScope, &[u8]), StorageError> {
@@ -729,7 +743,50 @@ pub(crate) fn scoped_key(store_id: Uuid, scope: MutationScope, suffix: &[u8]) ->
     key
 }
 
+// Owned open validates the same immutable receipt bytes in several snapshots
+// (disposable copies, then the real file) and from several validators. Receipt
+// validation is a pure function of its bytes, so inside a scope each distinct
+// receipt is decoded and checked once. Keyed by SHA-256 so the scope never holds
+// a second copy of the history; failures are never cached.
+thread_local! {
+    static RECEIPT_MEMO: std::cell::RefCell<Option<std::collections::HashMap<[u8; 32], StoredReceipt>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Shares validated receipts on this thread until dropped. Nested scopes reuse
+/// the outermost memo, which alone clears it.
+pub(crate) struct ReceiptMemo(bool);
+impl ReceiptMemo {
+    pub(crate) fn enter() -> Self {
+        RECEIPT_MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            let outermost = memo.is_none();
+            if outermost {
+                *memo = Some(std::collections::HashMap::new());
+            }
+            Self(outermost)
+        })
+    }
+}
+impl Drop for ReceiptMemo {
+    fn drop(&mut self) {
+        if self.0 {
+            RECEIPT_MEMO.with(|memo| *memo.borrow_mut() = None);
+        }
+    }
+}
+
 pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageError> {
+    let key: Option<[u8; 32]> = RECEIPT_MEMO.with(|memo| {
+        memo.borrow()
+            .is_some()
+            .then(|| Sha256::digest(bytes).into())
+    });
+    if let Some(key) = key
+        && let Some(hit) = RECEIPT_MEMO.with(|memo| memo.borrow().as_ref()?.get(&key).cloned())
+    {
+        return Ok(hit);
+    }
     #[cfg(test)]
     VALIDATION_WORK.with(|work| {
         let mut count = work.get();
@@ -1025,6 +1082,13 @@ pub(crate) fn validate_receipt(bytes: &[u8]) -> Result<StoredReceipt, StorageErr
         MutationOutcome::LifecycleMaterialized { .. }
         | MutationOutcome::BatchReserved { .. }
         | MutationOutcome::BatchItemRejected { .. } => {}
+    }
+    if let Some(key) = key {
+        RECEIPT_MEMO.with(|memo| {
+            if let Some(memo) = memo.borrow_mut().as_mut() {
+                memo.insert(key, stored.clone());
+            }
+        });
     }
     Ok(stored)
 }

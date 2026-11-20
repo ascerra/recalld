@@ -1130,3 +1130,69 @@ fn scope_id(f: &Fixture, id: MemoryId) -> crate::model::NamespaceId {
 
 #[path = "sweep_origin_tests.rs"]
 mod origin;
+
+// Issue #239: every swept memory adds a retained receipt. Reopen still runs
+// every full validation, over its disposable copies and the real file, but
+// decodes each receipt once. Native reads rely on that owned validation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_reopen_decodes_each_receipt_once_and_reads_skip_history() {
+    use crate::serialization::catalog_page::{CatalogKind, CatalogPageRequest};
+    use crate::serialization::list::ListPageRequest;
+    use crate::storage::control;
+    let (f, _) = setup_memories(4);
+    for hour in 1..=2 {
+        completion(&f).rebuild_all().await.unwrap();
+        let r = pass(&f, 3000 + hour * DAY / 24).await;
+        assert!(
+            r.errors.is_empty() && r.publication_error.is_none(),
+            "{r:?}"
+        );
+    }
+    let path = f.storage.read().unwrap().db_path().to_path_buf();
+    let root = f.close();
+    control::take_validation_work();
+    let engine = RedbStorageEngine::open_native(&path).unwrap();
+    let work = control::take_validation_work();
+    let receipts = {
+        let read = engine.meta_store().db.begin_read().unwrap();
+        read.open_table(control::RECEIPTS).unwrap().len().unwrap() as usize
+    };
+    assert!(receipts > 12, "{receipts}");
+    // Once on the disposable preflight copy, once on the opened real file.
+    assert_eq!(work.full_validations, 2, "{work:?}");
+    assert_eq!(work.receipt_decodes, receipts, "{work:?}");
+    drop(engine);
+
+    // Daemon startup: advisory classification, then the owned upgrade-or-open.
+    use crate::storage::automatic_upgrade::{StoreFormat, classify, prepare_upgrade};
+    assert_eq!(classify(&path).unwrap(), StoreFormat::Current);
+    let (engine, _upgrade) =
+        prepare_upgrade(&path, 3000, Box::new(crate::storage::ids::SystemIds)).unwrap();
+    let work = control::take_validation_work();
+    // Once on the disposable preflight copy, once on the opened real file.
+    assert_eq!(work.full_validations, 2, "{work:?}");
+    assert_eq!(work.receipt_decodes, receipts, "{work:?}");
+
+    let f = Fixture::from_open_engine(root, engine);
+    let engine = f.storage.read().unwrap();
+    let meta = engine.meta_store();
+    let list = ListPageRequest::from_mcp(&serde_json::json!({"contractVersion": 2})).unwrap();
+    let catalog = CatalogPageRequest::from_mcp(
+        &serde_json::json!({"contractVersion": 2}),
+        CatalogKind::Namespaces,
+    )
+    .unwrap();
+    let ticket = meta.work_tracker().admit(None).unwrap();
+    control::take_validation_work();
+    let page = meta
+        .canonical_list_page("native", &list, None, &ticket)
+        .unwrap();
+    assert!(!page.data.memories.is_empty());
+    meta.canonical_catalog_page(&catalog, None, &ticket)
+        .unwrap();
+    assert_eq!(
+        control::take_validation_work(),
+        control::ValidationWork::default()
+    );
+    meta.finish_work(ticket);
+}
