@@ -432,7 +432,8 @@ async fn replay_precedes_stale_tokens_policy_and_clock_but_not_lineage_or_payloa
         session
             .metadata()
             .apply_native_feedback(&newkey, &intent, &wrong_policy, clock.as_ref()),
-        Err(StorageError::InvalidMutation(message)) if message.contains("differs from canonical adoption")
+        // An unadopted configured multiplier is ignored; the stale intent refuses.
+        Err(StorageError::LifecycleConflict(_))
     ));
     assert!(matches!(
         session.apply_feedback(&newkey, &intent),

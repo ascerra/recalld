@@ -202,11 +202,12 @@ fn inherited_policy_unknown_requires_real_adoption_replay_before_cas_and_restart
             .is_ok()
     );
     let ns_cfg = owner.engine.get_namespace(ns).unwrap().unwrap();
-    assert!(
+    // An unadopted configured change does not apply: the adopted value governs.
+    assert_eq!(
         resolve_bound(&ns_cfg, &DecayConfig::default(), 0.)
-            .unwrap_err()
-            .to_string()
-            .contains("differs")
+            .unwrap()
+            .decay_rate_multiplier,
+        1.
     );
     drop(owner);
     let later = request(&path, ns, 0., "adopt-zero");

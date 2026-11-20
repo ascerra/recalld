@@ -14,8 +14,13 @@
 
 ### Fixed
 
+- Changing `decay_rate_multiplier` no longer makes `recall_memories`, `store_memory`, `reinforce_memory` and `get_memory` fail, or skips every decay sweep, on a store created by 2.x. Startup now adopts the new value for each namespace that inherits it, with a receipt, and logs a `WARN` per namespace with the old and new value and how many memories move to Summary or Ghost or are deleted at the next sweep. If a namespace cannot be adopted (for example, it has more than 100,000 memories, the preview limit), startup continues, the namespace keeps its previous value, and a `WARN` says the change is not yet applied. A sweep that cannot resolve one namespace's policy now skips that namespace with a `WARN` instead of stopping the pass for all of them. (#232)
 - `get_memory` and the web UI's memory view now return memories that older releases left in the Summary phase with their full text, or in the Ghost phase with tags, instead of failing with "Prepared remote response is unavailable" after an upgrade. The record is returned as stored. When a daemon reply is still rejected, the error message and the MCP or UI process log name the failed check. (#231)
 - docs/architecture.md gave the default decay timeline as about 36 days to Summary and 280 to Ghost; the formula gives about 16.5 and 160 (and about 6,300 days to removal, not 13,300). (#234)
+
+### Deprecated
+
+- `[decay.phase_thresholds]` and `decay.permastore_threshold_days` (and `RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`, `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS`) never had an effect: thresholds are set per namespace. They are still accepted, startup logs a `WARN` when they differ from the defaults, and they are gone from the sample config and the guide. (#233)
 
 ## 2.1.2 — 2026-11-20
 

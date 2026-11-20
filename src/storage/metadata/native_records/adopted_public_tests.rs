@@ -316,15 +316,23 @@ async fn adopted_public_feedback_requires_actual_adoption_after_global_change() 
         let old = receipts(&f);
         let root = closed(f, b, s, &d);
         let (f, b, s) = opened(root, &d, c.clone(), 0.).await;
-        let before = snapshot(&f, &d);
+        // An unadopted global change does not apply: the adopted value governs.
         let calls = c.0.load(Ordering::SeqCst);
         assert!(
-            !invoke(lane, &b, &s, &d, Operation::Feedback).await,
+            invoke(lane, &b, &s, &d, Operation::Feedback).await,
             "{lane:?}"
         );
-        assert_eq!(snapshot(&f, &d), before);
-        assert_eq!(c.0.load(Ordering::SeqCst), calls);
+        assert_eq!(c.0.load(Ordering::SeqCst), calls + 1);
+        original_one(&f, &d, Operation::Feedback);
+        let MutationOutcome::LifecycleFeedbackApplied { transition } =
+            latest(&f, Operation::Feedback).receipt.outcome
+        else {
+            panic!()
+        };
+        assert_eq!(transition.feedback.unwrap().decay_rate_multiplier.get(), 1.);
+        preserved(&old, &f);
         no_pending(&f);
+        let old = receipts(&f);
         let before = f.record(d.parent).unwrap();
         let root = closed(f, b, s, &d);
         adopt(&d, 0., "second-adoption", c.as_ref());
