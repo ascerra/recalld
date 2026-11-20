@@ -91,21 +91,10 @@ pub struct SystemStatus {
     pub data_dir: String,
     pub socket: String,
     pub health: crate::mcp::bridge::HealthStatus,
-    pub cache: CacheStatus,
     pub embedding: EmbeddingStatus,
     pub process: ProcessStatus,
     pub clients: Vec<ClientInfo>,
     pub sweep: SweepStatus,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CacheStatus {
-    pub hits: u64,
-    pub misses: u64,
-    pub entries: u64,
-    pub used_bytes: u64,
-    pub budget_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -475,7 +464,6 @@ pub(crate) fn declarations() -> String {
         SnapshotNodes,
         SnapshotEdges,
         SystemStatus,
-        CacheStatus,
         EmbeddingStatus,
         LatencyMs,
         ProcessStatus,

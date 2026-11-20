@@ -33,6 +33,7 @@
     onselect,
     onready,
     onsettled,
+    onfocuschange,
   }: {
     snapshot: Snapshot;
     scopeKey: string | null;
@@ -46,6 +47,8 @@
     onready?: (info: { cached: boolean; ms: number }) => void;
     /** The layout stopped moving (immediately for a cached layout). */
     onsettled?: () => void;
+    /** The local graph (a memory's neighborhood) was entered or left. */
+    onfocuschange?: (focused: boolean) => void;
   } = $props();
 
   let container: HTMLDivElement;
@@ -391,8 +394,22 @@
     sigma?.getCamera().zoomOut({ duration: 200 });
   }
   export function fit() {
+    if (focus) onfocuschange?.(false);
     focus = null;
+    beforeFocus = null;
     sigma?.getCamera().reset({ duration: 300 });
+  }
+  // The camera before entering the local graph, restored on exit.
+  let beforeFocus: { x: number; y: number; ratio: number; angle: number } | null = null;
+  /** Leave the local graph and return to the view from before it. */
+  export function exitFocus() {
+    if (!focus) return;
+    focus = null;
+    const cam = sigma?.getCamera();
+    if (beforeFocus) cam?.animate(beforeFocus, { duration: 300 });
+    else cam?.reset({ duration: 300 });
+    beforeFocus = null;
+    onfocuschange?.(false);
   }
   /** Show only `id`'s 2-hop neighborhood (double-click, "Local graph"). */
   export function focusNeighborhood(id: string) {
@@ -402,7 +419,9 @@
       near.add(a);
       for (const b of graph.neighbors(a)) near.add(b);
     }
+    if (!focus) beforeFocus = { ...sigma!.getCamera().getState() };
     focus = near;
+    onfocuschange?.(true);
     const pts = [...near].map((n) => graph!.getNodeAttributes(n) as { x: number; y: number });
     const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length, cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
     const c = sigma!.graphToViewport({ x: cx, y: cy });

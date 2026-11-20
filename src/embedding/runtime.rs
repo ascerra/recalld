@@ -246,7 +246,13 @@ impl EmbeddingProvider for CheckedProvider {
             source_bytes = text.len()
         );
         let call = crate::performance::Timer::new("provider.document");
+        #[cfg(feature = "ui")]
+        let started = std::time::Instant::now();
         let result = self.0.embed(text).await;
+        #[cfg(feature = "ui")]
+        if result.is_ok() {
+            crate::ui::events::embedding_latency(started.elapsed());
+        }
         crate::performance::event!(
             kind = "provider_return",
             task = "document",
@@ -274,7 +280,13 @@ impl EmbeddingProvider for CheckedProvider {
             source_bytes = text.len()
         );
         let call = crate::performance::Timer::new("provider.query");
+        #[cfg(feature = "ui")]
+        let started = std::time::Instant::now();
         let result = self.0.embed_query(text).await;
+        #[cfg(feature = "ui")]
+        if result.is_ok() {
+            crate::ui::events::embedding_latency(started.elapsed());
+        }
         crate::performance::event!(
             kind = "provider_return",
             task = "query",

@@ -370,8 +370,6 @@ pub fn sweep_schedule() -> (i64, u64) {
 
 // ── Process counters read by Health → System ───────────────────────────
 
-pub static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
-pub static CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
 static EMBED_LAST_US: AtomicU64 = AtomicU64::new(0);
 static EMBED_EWMA_US: AtomicU64 = AtomicU64::new(0);
 

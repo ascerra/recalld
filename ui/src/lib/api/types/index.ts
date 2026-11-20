@@ -28,9 +28,7 @@ export type SnapshotNodes = { ids: Array<string>, ns: string, phase: string, str
 
 export type SnapshotEdges = { src: string, dst: string, type: string, weight: string, };
 
-export type SystemStatus = { version: string, protocolVersion: number, pid: number, startedAt: number, uptimeSecs: number, dataDir: string, socket: string, health: HealthStatus, cache: CacheStatus, embedding: EmbeddingStatus, process: ProcessStatus, clients: Array<ClientInfo>, sweep: SweepStatus, };
-
-export type CacheStatus = { hits: number, misses: number, entries: number, usedBytes: number, budgetBytes: number, };
+export type SystemStatus = { version: string, protocolVersion: number, pid: number, startedAt: number, uptimeSecs: number, dataDir: string, socket: string, health: HealthStatus, embedding: EmbeddingStatus, process: ProcessStatus, clients: Array<ClientInfo>, sweep: SweepStatus, };
 
 export type EmbeddingStatus = { provider: string, model: string, dimensions: number, 
 /**

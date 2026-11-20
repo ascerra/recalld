@@ -17,7 +17,6 @@ use tokio::sync::watch;
 use super::events::{self, EventContext, RecallTrace, UiEvent};
 use super::wire::*;
 use crate::Recalld;
-use crate::cache::CacheManager;
 use crate::embedding::EmbeddingProvider;
 use crate::graph::SharedGraph;
 use crate::mcp::bridge::{BridgeError, HealthChecker};
@@ -30,7 +29,6 @@ pub const MAX_EDGE_PAGE: usize = 200_000;
 pub struct UiService {
     pub(super) storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     pub(super) graph: SharedGraph,
-    cache: Arc<CacheManager>,
     embedding: Arc<dyn EmbeddingProvider>,
     config: crate::RecalldConfig,
     pub(super) query_engine: Arc<crate::search::QueryEngine>,
@@ -67,7 +65,6 @@ impl UiService {
         Self {
             storage: system.storage().clone(),
             graph: system.graph().clone(),
-            cache: system.cache().clone(),
             embedding: system.embedding().clone(),
             config: system.config().clone(),
             query_engine: system.query_engine().clone(),
@@ -353,7 +350,6 @@ impl UiService {
     }
 
     pub async fn system_status(&self) -> SystemStatus {
-        let cache = self.cache.stats().await;
         let (last_us, smooth_us) = events::embedding_latency_us();
         let (last_sweep, interval) = events::sweep_schedule();
         let sweep_enabled = !self.config.decay.disable_sweep;
@@ -383,13 +379,6 @@ impl UiService {
             data_dir: self.config.storage.data_dir.clone(),
             socket: self.socket.get().cloned().unwrap_or_default(),
             health: self.health.check_health().await,
-            cache: CacheStatus {
-                hits: events::CACHE_HITS.load(Ordering::Relaxed),
-                misses: events::CACHE_MISSES.load(Ordering::Relaxed),
-                entries: cache.entry_count,
-                used_bytes: cache.weighted_size_bytes,
-                budget_bytes: cache.configured_capacity_bytes,
-            },
             embedding: EmbeddingStatus {
                 provider: serde_json::to_value(&self.config.embedding.provider)
                     .ok()

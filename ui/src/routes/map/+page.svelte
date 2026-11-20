@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { palette } from '$lib/palette.svelte';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import Screen from '$lib/components/Screen.svelte';
@@ -70,7 +71,8 @@
   let days = $state(0);
   const daysLabel = $derived(days === 0 ? 'now' : days < 60 ? `+${days} d` : `+${Math.round(days / 30)} mo`);
 
-  let map: { zoomIn(): void; zoomOut(): void; fit(): void; focusNeighborhood(id: string): void; center(id: string): void } | undefined = $state();
+  let map: { zoomIn(): void; zoomOut(): void; fit(): void; focusNeighborhood(id: string): void; exitFocus(): void; center(id: string): void } | undefined = $state();
+  let localGraph = $state(false);
   let panelOpen = $state(true);
 
   // ?id=… (from Explore's "Show on map" or the palette's ⌘↵): select it and
@@ -97,7 +99,15 @@
     queryFn: async () => (selection.id ? ((await memoryRows([selection.id]))[0] ?? null) : null),
     enabled: !!selection.id,
   }));
+  function onkeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && localGraph && !palette.open) {
+      e.preventDefault();
+      map?.exitFocus();
+    }
+  }
 </script>
+
+<svelte:window {onkeydown} />
 
 <Screen>
   <PageHeader title="Memory map" meta={graph.data ? `${count(graph.data.ids.length)} memories` : undefined} />
@@ -136,6 +146,9 @@
       {:else}
         <span class="pill quiet"><span class="pill-dot idle"></span>{live.connected ? 'listening for agents' : 'connecting to the daemon'}</span>
       {/if}
+      {#if localGraph}
+        <button type="button" class="pill back" onclick={() => map?.exitFocus()}>← Back</button>
+      {/if}
       {#key graph.data}
         {#await import('$lib/map/MemoryMap.svelte') then { default: MemoryMap }}
           <MemoryMap
@@ -147,6 +160,7 @@
             {phases}
             {edgeTypes}
             {onsettled}
+            onfocuschange={(f: boolean) => (localGraph = f)}
             onselect={(id) => {
               selection.select(id);
               if (id) panelOpen = true;
@@ -252,6 +266,10 @@
     font-size: var(--text-small);
     color: var(--color-accent-strong);
     cursor: pointer;
+  }
+  .pill.back {
+    left: 50%;
+    transform: translateX(-50%);
   }
   .pill.quiet {
     color: var(--color-text-muted);

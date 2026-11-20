@@ -39,7 +39,6 @@
   const st = $derived(report.data?.storage);
   const vectors = $derived((st?.vectorFiles ?? []).reduce((a, v) => a + v.bytes, 0));
   const s = $derived(system.data);
-  const hitRate = $derived(s && s.cache.hits + s.cache.misses > 0 ? s.cache.hits / (s.cache.hits + s.cache.misses) : null);
   const since = (t: number) => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const uptime = (secs: number) => {
     const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
@@ -154,7 +153,6 @@
         <div class="tile"><span class="tl">Uptime</span><span class="tv">{uptime(s.uptimeSecs)}</span><span class="tc">since {since(s.startedAt)}</span></div>
         <div class="tile"><span class="tl">Memory</span><span class="tv">{s.process.rssBytes !== null ? bytes(s.process.rssBytes) : '—'}</span><span class="tc">resident</span></div>
         <div class="tile"><span class="tl">CPU</span><span class="tv">{s.process.cpuPercent !== null ? `${s.process.cpuPercent.toFixed(1)}%` : '—'}</span><span class="tc">since the last check</span></div>
-        <div class="tile"><span class="tl">Cache</span><span class="tv">{hitRate !== null ? `${Math.round(hitRate * 100)}%` : '—'}</span><span class="tc">hit rate · {bytes(s.cache.usedBytes)} of {bytes(s.cache.budgetBytes)}</span></div>
         <div class="tile"><span class="tl">Embedding</span><span class="tv">{s.embedding.latencyMs ? `${Math.round(s.embedding.latencyMs.smoothed)} ms` : '—'}</span><span class="tc mono">{s.embedding.model}</span></div>
       </div>
       <div class="sys-row">

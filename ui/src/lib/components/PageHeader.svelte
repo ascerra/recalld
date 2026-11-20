@@ -53,13 +53,16 @@
     justify-content: space-between;
     gap: var(--space-3);
     height: var(--button-h);
-    padding: 0 calc(var(--space-1) / 2);
-    border: 0;
-    border-bottom: var(--rule) solid var(--color-text-2);
-    background: transparent;
+    padding: 0 var(--space-2) 0 var(--space-4);
+    border: var(--hairline) solid var(--color-border);
+    border-radius: var(--radius-pill);
+    background: var(--color-surface);
     color: var(--color-text-muted);
     font: var(--text-input) var(--font-sans);
     cursor: text;
     text-align: left;
+  }
+  .search:hover {
+    border-color: var(--color-border-strong);
   }
 </style>
