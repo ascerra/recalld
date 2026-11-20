@@ -1,15 +1,16 @@
 // DESIGN §6 visual encoding, as graphology attributes for sigma.
 import type { MapTheme } from './theme';
 import { alpha } from './theme';
-import { nodeSize } from './protocol';
+import { displaySize } from './protocol';
 
 export const EDGE = { parent: 1, associative: 2, causal: 3, contradicts: 4, entity: 5, temporal: 6, supersedes: 7 } as const;
 export const EDGE_LABELS: Record<number, string> = {
   1: 'Parent', 2: 'Associative', 3: 'Causal', 4: 'Contradicts', 5: 'Entity', 6: 'Temporal', 7: 'Supersedes',
 };
 
-export function nodeAttributes(theme: MapTheme, phase: number, degree: number, permastore: boolean) {
-  const size = nodeSize(degree);
+/** `strength`: retrievability now (0..1); a memory just stored is 1. */
+export function nodeAttributes(theme: MapTheme, phase: number, degree: number, permastore: boolean, strength = 1) {
+  const size = displaySize(degree, strength);
   switch (phase) {
     case 1:
       return { size, color: alpha(theme.node, 0.82), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };

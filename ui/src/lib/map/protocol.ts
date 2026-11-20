@@ -29,6 +29,11 @@ export function setDegreeScale(max: number) {
 }
 /** 0 for an unlinked memory, 1 for the most-connected one (log-scaled). */
 export const hubness = (degree: number) => Math.log(1 + degree) / Math.log(1 + maxDegree);
-/** Node radius at zoom 1: grows with links, scaled to the graph's own range
- *  so hubs stand out (DESIGN §6 used 2.4 + 1.9·ln(1+degree); widened on review). */
+/** Radius for the physics at zoom 1: links only, so a memory fading doesn't
+ *  reshuffle the layout (DESIGN §6 used 2.4 + 1.9·ln(1+degree); widened on review). */
 export const nodeSize = (degree: number) => 2.5 + 9.5 * Math.pow(Math.min(1, hubness(degree)), 1.6);
+/** Drawn radius: 60% how connected a memory is, 40% how strong it is now
+ *  (retrievability, 0..1), so a hub that is fading shrinks and a strong
+ *  memory with few links still reads. */
+export const displaySize = (degree: number, strength: number) =>
+  2.5 + 9.5 * Math.pow(0.6 * Math.min(1, hubness(degree)) + 0.4 * Math.min(1, Math.max(0, strength)), 1.6);

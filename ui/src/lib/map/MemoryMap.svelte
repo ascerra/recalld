@@ -128,7 +128,7 @@
         x: x[i],
         y: y[i],
         index: i,
-        ...nodeAttributes(theme, s.phase[i], s.degree[i], s.permastore[i] === 1),
+        ...nodeAttributes(theme, s.phase[i], s.degree[i], s.permastore[i] === 1, strengthAt(i)),
       });
     }
     for (let k = 0; k < s.src.length; k++) {
@@ -143,11 +143,20 @@
   }
 
   // ── Encoding updates (phase filter, decay projection, links menu) ─────
+  /** Retrievability of snapshot memory `i` at `at` (the Explore "strength").
+   *  ponytail: ignores per-namespace decay multipliers, like projectedPhase. */
+  function strengthAt(i: number, at = Date.now()): number {
+    const s = snapshot;
+    if (i < 0 || s.permastore[i]) return 1;
+    if (s.stability[i] <= 0) return s.strength[i];
+    return retrievability(Math.max(0, at - s.lastAccess[i]) / DAY_MS, s.stability[i], 1);
+  }
+
   function projectedPhase(i: number, at: number): number {
     const s = snapshot;
     if (s.permastore[i] || s.phase[i] === 4 || s.stability[i] <= 0) return s.phase[i];
     const ns = s.namespaces.find((n) => n.id === s.ns[i]);
-    const r = retrievability(Math.max(0, at - s.lastAccess[i]) / DAY_MS, s.stability[i], 1);
+    const r = strengthAt(i, at);
     // The projection never makes a memory stronger than recalld says it is now.
     return Math.max(s.phase[i], phaseFor(r, (ns?.thresholds as [number, number, number]) ?? undefined));
   }
@@ -158,7 +167,7 @@
     graph.forEachNode((id, attrs) => {
       const i = attrs.index as number;
       const phase = projectionDays > 0 ? projectedPhase(i, at) : snapshot.phase[i];
-      const enc = nodeAttributes(theme, phase, snapshot.degree[i], snapshot.permastore[i] === 1);
+      const enc = nodeAttributes(theme, phase, snapshot.degree[i], snapshot.permastore[i] === 1, strengthAt(i, at));
       const hidden = !phases.has(phase) || (focus !== null && !focus.has(id));
       graph!.mergeNodeAttributes(id, { ...enc, phase, visibility: hidden ? 'hidden' : enc.visibility });
     });
@@ -358,7 +367,7 @@
       flashUntil.delete(id);
       const a = graph.getNodeAttributes(id);
       const i = a.index as number;
-      const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(id), i >= 0 && snapshot.permastore[i] === 1);
+      const enc = nodeAttributes(theme, (a.phase as number) ?? 1, i >= 0 ? snapshot.degree[i] : graph.degree(id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i));
       graph.setNodeAttribute(id, 'color', enc.color);
       sigma?.refresh({ skipIndexation: true });
     }, FLASH_MS + 20);
@@ -536,7 +545,7 @@
       }
     } else if (e.kind === 'phase_change' && graph.hasNode(e.id)) {
       const i = graph.getNodeAttribute(e.id, 'index') as number;
-      const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1);
+      const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i));
       graph.mergeNodeAttributes(e.id, { ...enc, phase: e.to, visibility: phases.has(e.to) ? enc.visibility : 'hidden' });
     } else if (e.kind === 'forget' && graph.hasNode(e.id)) {
       death(e.id);
