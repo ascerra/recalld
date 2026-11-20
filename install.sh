@@ -55,6 +55,7 @@ get_target_version() {
 }
 
 download_and_install() {
+    # The standard build includes the local web UI (`recalld ui`).
     local asset="recalld-${PLATFORM}.tar.gz"
     local url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
 

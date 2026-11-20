@@ -327,6 +327,8 @@ impl RelationshipGraph {
             .nodes
             .get_mut(key)
             .ok_or(GraphError::MemoryNotFound(memory_id))?;
+        #[cfg(feature = "ui")]
+        crate::ui::events::phase_changed(memory_id, node.decay_phase, decay_phase);
         node.decay_phase = decay_phase;
         node.strength = strength;
         Ok(())
@@ -424,6 +426,8 @@ impl RelationshipGraph {
             .incoming
             .push(edge_key);
 
+        #[cfg(feature = "ui")]
+        crate::ui::events::edge_added(source, target, edge_type, weight.clamp(0.0, 1.0));
         Ok(edge_key)
     }
 
@@ -633,6 +637,10 @@ impl RelationshipGraph {
     /// Only creates a bridge for pass-through nodes (1 in, 1 out, same
     /// edge type). Bridge weight = w_in * w_out * 0.9, minimum 0.1.
     pub fn remove_memory_with_bridging(&mut self, memory_id: MemoryId) -> RemovalResult {
+        #[cfg(feature = "ui")]
+        if self.id_index.contains_key(&memory_id) {
+            crate::ui::events::node_removed(memory_id);
+        }
         let Some(&node_key) = self.id_index.get(&memory_id) else {
             return RemovalResult {
                 removed_edges: Vec::new(),
@@ -733,6 +741,10 @@ impl RelationshipGraph {
     /// on the strength of it would resurrect, in summary form, the thing
     /// that was just destroyed.
     pub fn remove_memory(&mut self, memory_id: MemoryId) -> Vec<GraphEdge> {
+        #[cfg(feature = "ui")]
+        if self.id_index.contains_key(&memory_id) {
+            crate::ui::events::node_removed(memory_id);
+        }
         let Some(&node_key) = self.id_index.get(&memory_id) else {
             return Vec::new();
         };

@@ -225,6 +225,8 @@ pub struct NamespaceStatsResponse {
 /// Memory count breakdown by decay phase.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ui", ts(rename = "ReportPhaseCounts"))]
 pub struct PhaseCounts {
     /// Memories in Full phase (phase 1).
     pub full: u64,
@@ -425,6 +427,7 @@ pub struct HealthReportQuery {
 /// GET /health/report -- comprehensive decay health report.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct HealthReport {
     /// Namespace name (if filtered), or "all".
     pub scope: String,
@@ -451,6 +454,7 @@ pub struct HealthReport {
 /// Overview section of the health report.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct HealthOverview {
     /// Total memory count.
     pub total_memories: u64,
@@ -463,6 +467,7 @@ pub struct HealthOverview {
 /// Decay forecast with transitions bucketed by time horizon.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct DecayForecast {
     /// Phase transitions expected within 7 days.
     pub transitions_7d: TransitionCounts,
@@ -475,6 +480,7 @@ pub struct DecayForecast {
 /// Count of phase transitions by type.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct TransitionCounts {
     /// Full -> Summary transitions.
     pub full_to_summary: u64,
@@ -487,6 +493,7 @@ pub struct TransitionCounts {
 /// A memory at risk of deletion.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct AtRiskMemory {
     /// Short UUID (first 8 chars).
     pub id: String,
@@ -503,6 +510,7 @@ pub struct AtRiskMemory {
 /// Memory age statistics.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct AgeDistribution {
     /// Unix millis of oldest memory.
     pub oldest_created_at: Option<i64>,
@@ -517,6 +525,7 @@ pub struct AgeDistribution {
 /// Storage breakdown by file.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct StorageBreakdown {
     /// Total size of data directory in bytes.
     pub total_bytes: u64,
@@ -533,6 +542,7 @@ pub struct StorageBreakdown {
 /// Size of a single namespace's vector file.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct VectorFileSize {
     /// Namespace name.
     pub namespace: String,
@@ -543,6 +553,7 @@ pub struct VectorFileSize {
 /// Tag statistics section of the health report.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct MetadataStats {
     /// Top 10 tags by memory count.
     pub top_tags: Vec<TagCount>,
@@ -553,6 +564,8 @@ pub struct MetadataStats {
 /// A single tag with its memory count.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ui", ts(rename = "ReportTagCount"))]
 pub struct TagCount {
     /// Tag string.
     pub tag: String,

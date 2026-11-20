@@ -1065,7 +1065,7 @@ impl Recalld {
     /// 4. Flush and sync all storage files
     /// 5. Persist phase index to disk
     /// 6. Drop subsystems in reverse init order (handled by Rust's struct drop)
-    async fn shutdown(self) -> Result<()> {
+    pub(crate) async fn shutdown(self) -> Result<()> {
         tracing::info!("shutdown sequence started");
         let shutdown_start = std::time::Instant::now();
 

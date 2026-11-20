@@ -6,6 +6,9 @@
 pub mod claude;
 pub mod locomo;
 
+/// Synthetic stores and a deterministic embedding stub for the UI harness.
+pub mod synthetic;
+
 /// Private evaluator-channel consumer, never an actor MCP tool.
 pub mod controls;
 

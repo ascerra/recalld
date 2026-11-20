@@ -332,6 +332,21 @@ impl Default for RifConfig {
     }
 }
 
+/// Local web UI (`recalld ui`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UiConfig {
+    /// Whether `recalld ui` may run. On by default; set `false` to turn the
+    /// browser UI off (agents and the MCP server are unaffected).
+    pub enabled: bool,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Logging output configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]

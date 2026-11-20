@@ -122,6 +122,22 @@ enum Command {
         preview_at: Option<i64>,
     },
 
+    /// Open the local web UI (starts the daemon if needed)
+    #[cfg(feature = "ui")]
+    Ui {
+        /// Port on 127.0.0.1 (default: a free port)
+        #[arg(long)]
+        port: Option<u16>,
+
+        /// Print the link without opening a browser
+        #[arg(long)]
+        no_open: bool,
+
+        /// Log level filter
+        #[arg(short, long, env = "RECALLD_LOG_LEVEL")]
+        log_level: Option<String>,
+    },
+
     /// Run external benchmarks (LoCoMo, etc.)
     #[cfg(feature = "bench")]
     Bench {
@@ -142,8 +158,9 @@ enum DaemonAction {
         #[arg(long)]
         foreground: bool,
 
-        /// Idle timeout in minutes before auto-shutdown (0 = no timeout)
-        #[arg(long, default_value = "30", env = "RECALLD_DAEMON_IDLE_TIMEOUT")]
+        /// Idle timeout in minutes before auto-shutdown (default 0: never;
+        /// the daemon keeps running for agents and the UI)
+        #[arg(long, default_value = "0", env = "RECALLD_DAEMON_IDLE_TIMEOUT")]
         idle_timeout: u64,
 
         /// Log level filter
@@ -161,6 +178,41 @@ enum DaemonAction {
 #[cfg(feature = "bench")]
 #[derive(Subcommand, Debug)]
 enum BenchTarget {
+    /// Serve a deterministic Ollama-compatible embedding endpoint (UI tests)
+    EmbedStub {
+        #[arg(long, default_value = "127.0.0.1:11435")]
+        addr: std::net::SocketAddr,
+        #[arg(long, default_value = "64")]
+        dim: usize,
+    },
+
+    /// Time agent recalls (`search` RPCs) against a daemon over --data-dir
+    RecallLatency {
+        #[arg(long, default_value = "300")]
+        queries: usize,
+        /// Attach a UI event subscriber while measuring (needs --features ui)
+        #[arg(long)]
+        subscribe: bool,
+        #[arg(long, default_value = "64")]
+        embed_dim: usize,
+    },
+
+    /// Generate a synthetic store (into --data-dir) for the UI perf harness
+    Synthetic {
+        #[arg(long, default_value = "10000")]
+        memories: usize,
+        /// Approximate number of graph edges
+        #[arg(long, default_value = "100000")]
+        edges: usize,
+        /// The reference screens' sample content instead of generated topics
+        #[arg(long)]
+        sample: bool,
+        #[arg(long, default_value = "7")]
+        seed: u64,
+        #[arg(long, default_value = "64")]
+        embed_dim: usize,
+    },
+
     /// Run the LoCoMo benchmark (long-term conversational memory QA)
     Locomo {
         /// Path to the locomo10.json dataset file
@@ -279,6 +331,14 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+        #[cfg(feature = "ui")]
+        Command::Ui { log_level, .. } => {
+            let level = log_level.as_deref().unwrap_or("warn");
+            if let Err(e) = init_tracing(level, false, true) {
+                eprintln!("fatal: failed to initialize tracing: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
         #[cfg(feature = "bench")]
         Command::Bench { .. } => {}
     }
@@ -364,14 +424,155 @@ async fn async_main(cli: Cli) -> ExitCode {
                 }
             }
         }
+        #[cfg(feature = "ui")]
+        Command::Ui { port, no_open, .. } => run_ui(loaded.config, port, !no_open).await,
         #[cfg(feature = "bench")]
         Command::Bench { target, format } => run_bench(loaded.config, target, &format).await,
     }
 }
 
+#[cfg(feature = "ui")]
+async fn run_ui(config: RecalldConfig, port: Option<u16>, open_browser: bool) -> ExitCode {
+    if !config.ui.enabled {
+        eprintln!(
+            "The local web UI is turned off ([ui] enabled = false or RECALLD_UI_ENABLED=false)."
+        );
+        return ExitCode::FAILURE;
+    }
+    let socket = recalld::daemon::socket_path();
+    let reachable = async |socket: &Path| match recalld::daemon::DaemonClient::connect(socket).await
+    {
+        Ok(client) => client.ping().await.is_ok(),
+        Err(_) => false,
+    };
+    let starter: recalld::ui::Starter = {
+        let (config, socket) = (config.clone(), socket.clone());
+        Arc::new(move || {
+            let (config, socket) = (config.clone(), socket.clone());
+            Box::pin(async move {
+                spawn_daemon(&config, &socket)
+                    .await
+                    .map(drop)
+                    .map_err(|e| e.to_string())
+            })
+        })
+    };
+    if !reachable(&socket).await {
+        if let Err(e) = starter().await {
+            eprintln!("warning: could not start the daemon ({e}); the UI will offer to retry");
+        }
+    }
+    let options = recalld::ui::UiOptions {
+        port,
+        open_browser,
+        socket,
+        starter: Some(starter),
+    };
+    match recalld::ui::run(options).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("recalld ui failed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[cfg(feature = "bench")]
 async fn run_bench(config: RecalldConfig, target: BenchTarget, format: &str) -> ExitCode {
+    use recalld::bench::synthetic;
     match target {
+        BenchTarget::EmbedStub { addr, dim } => {
+            match synthetic::serve_embed_stub(addr, dim).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("embedding stub failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        BenchTarget::RecallLatency {
+            queries,
+            subscribe,
+            embed_dim,
+        } => {
+            let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("cannot bind the embedding stub: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let addr = listener.local_addr().expect("bound");
+            drop(listener);
+            tokio::spawn(synthetic::serve_embed_stub(addr, embed_dim));
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let mut config = config;
+            config.embedding.provider = recalld::config::EmbeddingProvider::Ollama;
+            config.embedding.model_name = "hash-embed".into();
+            config.embedding.dimensions = embed_dim;
+            config.embedding.base_url = format!("http://{addr}");
+            config.decay.disable_sweep = true;
+            match synthetic::recall_latency(config, queries, subscribe, embed_dim).await {
+                Ok(v) => {
+                    println!("{v}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("recall latency failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        BenchTarget::Synthetic {
+            memories,
+            edges,
+            sample,
+            seed,
+            embed_dim,
+        } => {
+            let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("cannot bind the embedding stub: {e}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            let addr = listener.local_addr().expect("bound");
+            drop(listener);
+            tokio::spawn(synthetic::serve_embed_stub(addr, embed_dim));
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let mut config = config;
+            config.embedding.provider = recalld::config::EmbeddingProvider::Ollama;
+            config.embedding.model_name = "hash-embed".into();
+            config.embedding.dimensions = embed_dim;
+            config.embedding.base_url = format!("http://{addr}");
+            let started = std::time::Instant::now();
+            let opts = synthetic::SyntheticOptions {
+                memories,
+                edges,
+                sample,
+                seed,
+                embed_dim,
+            };
+            match synthetic::generate(config, &opts).await {
+                Ok(summary) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "memories": summary.memories,
+                            "edges": summary.edges,
+                            "namespaces": summary.namespaces,
+                            "seconds": started.elapsed().as_secs_f64(),
+                        })
+                    );
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("synthetic store failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         BenchTarget::Locomo {
             data,
             top_k,
@@ -735,6 +936,16 @@ fn create_remote_mcp_bridge(
 ) -> recalld::mcp::bridge::McpBridge {
     use recalld::daemon::bridge_adapters::*;
 
+    // Name this MCP process's daemon connection once the client says who it is.
+    #[cfg(feature = "ui")]
+    {
+        let client = client.clone();
+        recalld::ui::agent::on_set(move |name, kind| {
+            let (client, name) = (client.clone(), name.to_owned());
+            tokio::spawn(async move { client.set_agent(&name, kind).await });
+        });
+    }
+
     recalld::mcp::bridge::McpBridge {
         search: Arc::new(RemoteSearchAdapter::new(client.clone())),
         storage: Arc::new(RemoteStorageAdapter::new(client.clone())),
@@ -759,6 +970,15 @@ async fn try_daemon_connection(
     default_namespace: &str,
     tz: chrono_tz::Tz,
 ) -> Result<Option<recalld::mcp::bridge::McpBridge>, DaemonStartupError> {
+    Ok(try_daemon_client(socket)
+        .await?
+        .map(|client| create_remote_mcp_bridge(client, default_namespace, tz)))
+}
+
+/// A connected, handshaken daemon client, or `None` when nothing listens.
+async fn try_daemon_client(
+    socket: &Path,
+) -> Result<Option<Arc<recalld::daemon::DaemonClient>>, DaemonStartupError> {
     use std::io::ErrorKind;
 
     let client = match recalld::daemon::DaemonClient::connect(socket).await {
@@ -773,11 +993,7 @@ async fn try_daemon_connection(
         }
     };
     match tokio::time::timeout(Duration::from_secs(2), client.ping()).await {
-        Ok(Ok(())) => Ok(Some(create_remote_mcp_bridge(
-            client,
-            default_namespace,
-            tz,
-        ))),
+        Ok(Ok(())) => Ok(Some(client)),
         Ok(Err(e)) => Err(DaemonStartupError::Unavailable(format!(
             "daemon accepted the socket but the handshake failed (it may be at its connection limit): {e}"
         ))),
@@ -793,6 +1009,15 @@ async fn auto_start_daemon(
     default_namespace: &str,
     tz: chrono_tz::Tz,
 ) -> Result<recalld::mcp::bridge::McpBridge, DaemonStartupError> {
+    let client = spawn_daemon(config, socket).await?;
+    Ok(create_remote_mcp_bridge(client, default_namespace, tz))
+}
+
+/// Start a detached daemon (same binary) and wait until it answers `ping`.
+async fn spawn_daemon(
+    config: &RecalldConfig,
+    socket: &Path,
+) -> Result<Arc<recalld::daemon::DaemonClient>, DaemonStartupError> {
     use std::process::Command as StdCommand;
 
     let exe = std::env::current_exe()?;
@@ -842,9 +1067,9 @@ async fn auto_start_daemon(
             )
             .into());
         }
-        if let Some(bridge) = try_daemon_connection(socket, default_namespace, tz).await? {
+        if let Some(client) = try_daemon_client(socket).await? {
             tracing::info!(socket = %socket.display(), "connected after daemon startup");
-            return Ok(bridge);
+            return Ok(client);
         }
     }
 }
@@ -954,11 +1179,8 @@ async fn run_daemon(config: RecalldConfig, action: DaemonAction) -> ExitCode {
             idle_timeout,
             ..
         } => {
-            let timeout = if idle_timeout == 0 {
-                Duration::from_secs(u64::MAX / 2)
-            } else {
-                Duration::from_secs(idle_timeout * 60)
-            };
+            let timeout =
+                (idle_timeout > 0).then(|| Duration::from_secs(idle_timeout.saturating_mul(60)));
             if foreground {
                 run_daemon_foreground(config, timeout).await
             } else {
@@ -970,7 +1192,10 @@ async fn run_daemon(config: RecalldConfig, action: DaemonAction) -> ExitCode {
     }
 }
 
-async fn run_daemon_foreground(mut config: RecalldConfig, idle_timeout: Duration) -> ExitCode {
+async fn run_daemon_foreground(
+    mut config: RecalldConfig,
+    idle_timeout: Option<Duration>,
+) -> ExitCode {
     let socket = recalld::daemon::socket_path();
 
     if recalld::daemon::is_daemon_alive(&socket).unwrap_or(false) {

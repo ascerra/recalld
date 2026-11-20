@@ -11,3 +11,7 @@ Caleb requires agents to clean up temporary resources when finished. His explici
 - Every completion handoff must report cleanup performed, approximate actual space recovered, and retained scratch paths with owner and reason. Clean completed runs before allocating another large run.
 - Keep durable findings and compact reports inside this repository. Never upload build caches/raw archives merely to free disk space. Experiments without a completed PR still need an explicit retention/release decision before unique raw data is removed; their inactive regenerable build caches may be cleaned safely.
 - Tests must remain isolated from personal recalld data, daemon sockets, credentials and backups.
+
+# Local web UI
+
+- When changing an API response used by the UI, regenerate UI types and update docs/ui/.

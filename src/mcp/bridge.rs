@@ -704,9 +704,11 @@ pub struct StoredMemory {
 /// A full memory record returned by get.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct MemoryRecord {
     /// Exact persisted structured labels and provenance; omitted for legacy records.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ui", ts(type = "unknown"))]
     pub labels: Option<crate::model::schema::StructuredLabels>,
     /// Memory ID.
     pub id: String,
@@ -784,6 +786,7 @@ pub struct ListTagsInput {
 /// One label and the number of live memories carrying it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct TagCount {
     /// The label. In the `entities`, `topics` and `emotions` buckets the
     /// derived prefix is **stripped**, so the value can be passed
@@ -798,6 +801,7 @@ pub struct TagCount {
 /// One bucket of a tag listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct TagBucket {
     /// Distinct labels in this bucket *before* truncation, so a truncated
     /// answer still states its own size.
@@ -815,6 +819,7 @@ pub struct TagBucket {
 /// and useless for discovering the plain tags a caller would filter on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct ListTagsResponse {
     /// The namespace counted, or `null` when every namespace was counted.
     pub namespace: Option<String>,
@@ -935,6 +940,7 @@ pub struct DeleteNamespaceResult {
 /// Namespace information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct NamespaceInfo {
     /// Namespace numeric ID.
     pub id: u32,
@@ -951,6 +957,7 @@ pub struct NamespaceInfo {
 /// Namespace statistics.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct NamespaceStats {
     /// Namespace name.
     pub name: String,
@@ -988,6 +995,7 @@ pub struct NamespaceStats {
 /// Memory counts by decay phase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct PhaseCounts {
     /// Memories in the Full phase.
     pub full: u64,
@@ -1000,6 +1008,7 @@ pub struct PhaseCounts {
 /// System health status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct HealthStatus {
     /// Overall system status (e.g. "ok" or "degraded").
     pub status: String,
@@ -1011,6 +1020,7 @@ pub struct HealthStatus {
 
 /// Health of a single subsystem.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct SubsystemHealth {
     /// Subsystem name.
     pub name: String,

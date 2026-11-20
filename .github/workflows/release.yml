@@ -14,8 +14,31 @@ env:
   RUSTUP_TOOLCHAIN: "1.94.1"
 
 jobs:
+  ui-assets:
+    name: Build UI assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm -C ui install --frozen-lockfile
+      - run: pnpm -C ui build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist/
+          if-no-files-found: error
+
   build:
+    # The standard binaries embed the local web UI (`recalld ui`).
     name: Build (${{ matrix.target }})
+    needs: ui-assets
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -36,6 +59,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist
 
       - uses: dtolnay/rust-toolchain@master
         with:
@@ -101,7 +129,7 @@ jobs:
 
   checksums:
     name: Checksums
-    needs: build
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - name: Download release assets

@@ -516,7 +516,7 @@ pub fn spreading_activation(
     namespace_id: NamespaceId,
     config: &SpreadingActivationConfig,
 ) -> Vec<(MemoryId, f32)> {
-    spreading_activation_resolved(graph, seeds, namespace_id, config, None)
+    spreading_activation_resolved(graph, seeds, namespace_id, config, None, None)
 }
 
 pub fn spreading_activation_with_records(
@@ -526,7 +526,32 @@ pub fn spreading_activation_with_records(
     config: &SpreadingActivationConfig,
     records: &HashMap<MemoryId, crate::model::CachedRecord>,
 ) -> Vec<(MemoryId, f32)> {
-    spreading_activation_resolved(graph, seeds, namespace_id, config, Some(records))
+    spreading_activation_resolved(graph, seeds, namespace_id, config, Some(records), None)
+}
+
+/// One accumulation of spread, recorded for the local UI's recall light.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpreadStep {
+    pub from: MemoryId,
+    pub to: MemoryId,
+    pub edge_type: crate::model::EdgeType,
+    pub amount: f32,
+    /// PQSA firing index of `from` (0 = first expansion); bounded by `max_budget`.
+    pub order: u32,
+}
+
+/// [`spreading_activation`] / [`spreading_activation_with_records`] that also
+/// records every accumulation into `trace`. Results are identical.
+#[cfg(feature = "ui")]
+pub fn spreading_activation_traced(
+    graph: &RelationshipGraph,
+    seeds: &[(MemoryId, f32)],
+    namespace_id: NamespaceId,
+    config: &SpreadingActivationConfig,
+    records: Option<&HashMap<MemoryId, crate::model::CachedRecord>>,
+    trace: &mut Vec<SpreadStep>,
+) -> Vec<(MemoryId, f32)> {
+    spreading_activation_resolved(graph, seeds, namespace_id, config, records, Some(trace))
 }
 
 fn spreading_activation_resolved(
@@ -535,6 +560,7 @@ fn spreading_activation_resolved(
     namespace_id: NamespaceId,
     config: &SpreadingActivationConfig,
     records: Option<&HashMap<MemoryId, crate::model::CachedRecord>>,
+    mut trace: Option<&mut Vec<SpreadStep>>,
 ) -> Vec<(MemoryId, f32)> {
     let canonical_strength = |node: &GraphNode| {
         records
@@ -707,6 +733,15 @@ fn spreading_activation_resolved(
             let neighbor_activation = activation.entry(neighbor_key).or_insert(0.0);
             let new_activation = (*neighbor_activation + spread).min(1.0);
             *neighbor_activation = new_activation;
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.push(SpreadStep {
+                    from: entry.memory_id,
+                    to: neighbor.memory_id,
+                    edge_type: edge.edge_type,
+                    amount: spread,
+                    order: (nodes_processed - 1) as u32,
+                });
+            }
 
             // Push to queue if above firing threshold and not yet fired
             if new_activation >= config.firing_threshold && !fired.contains(&neighbor_key) {

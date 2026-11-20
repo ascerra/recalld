@@ -50,6 +50,8 @@ pub mod system;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod time;
+#[cfg(feature = "ui")]
+pub mod ui;
 
 // ── Top-level re-exports ─────────────────────────────────────────────
 //

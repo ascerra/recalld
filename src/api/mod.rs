@@ -15,6 +15,8 @@
 pub mod adapters;
 mod errors;
 mod handlers;
+#[cfg(feature = "ui")]
+pub(crate) use handlers::compute_health_report;
 #[cfg(test)]
 pub(crate) use handlers::validation_tests::fixture_state_with_embedding;
 mod store_api1;

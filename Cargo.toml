@@ -29,8 +29,13 @@ name = "recalld"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["ui"]
 bench = []
+# Local web UI (`recalld ui`), on by default and turned off at runtime with
+# `[ui] enabled = false`. Build without it (`--no-default-features`, as the
+# Docker image does) for a headless binary. The SPA is embedded from
+# `ui/dist` when built first (`make release`); without it the UI page says so.
+ui = ["dep:rust-embed", "dep:ts-rs", "dep:futures-core", "tower-http/compression-gzip"]
 
 [dependencies]
 # ── Async runtime & networking ────────────────────────────────────
@@ -122,6 +127,11 @@ dirs        = "5"
 tempfile    = "3"
 hostname    = "0.4"
 zip         = { version = "9.7.0", features = ["deflate-flate2-zlib"] }
+
+# ── Local web UI (feature `ui` only) ─────────────────────────────
+rust-embed  = { version = "8.14", optional = true, features = ["mime-guess"] }
+ts-rs       = { version = "12", optional = true }
+futures-core = { version = "0.3", optional = true }
 
 [dev-dependencies]
 rand_chacha = "=0.3.1"

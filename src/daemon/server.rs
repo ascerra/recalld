@@ -29,7 +29,14 @@ pub struct DaemonServer {
     connection_count: Arc<AtomicU32>,
     last_activity: Arc<AtomicI64>,
     shutdown_tx: watch::Sender<bool>,
+    ui: UiHook,
 }
+
+/// The local UI's daemon-side service; nothing without the `ui` feature.
+#[cfg(feature = "ui")]
+type UiHook = Option<Arc<crate::ui::daemon::UiService>>;
+#[cfg(not(feature = "ui"))]
+type UiHook = ();
 
 impl DaemonServer {
     /// Creates a new daemon server backed by the given `Recalld` system.
@@ -81,8 +88,13 @@ impl DaemonServer {
             Arc::new(McpHealthAdapter::new(system.storage().clone()));
 
         let (shutdown_tx, _) = watch::channel(false);
+        #[cfg(feature = "ui")]
+        let ui = Some(Arc::new(crate::ui::daemon::UiService::new(&system)));
+        #[cfg(not(feature = "ui"))]
+        let ui = ();
 
         Self {
+            ui,
             _system: system,
             search,
             storage,
@@ -94,8 +106,40 @@ impl DaemonServer {
         }
     }
 
+    /// Serve one already-accepted connection (tests: no socket/PID files).
+    #[cfg(all(test, feature = "ui"))]
+    pub(crate) fn serve_stream(
+        &self,
+        stream: tokio::net::UnixStream,
+    ) -> tokio::task::JoinHandle<()> {
+        self.connection_count.fetch_add(1, Ordering::Relaxed);
+        tokio::spawn(handle_connection_with(
+            self.search.clone(),
+            self.storage.clone(),
+            self.namespaces.clone(),
+            self.health.clone(),
+            stream,
+            self.connection_count.clone(),
+            self.last_activity.clone(),
+            self.shutdown_tx.subscribe(),
+            self.shutdown_tx.clone(),
+            self.ui.clone(),
+        ))
+    }
+
+    #[cfg(all(test, feature = "ui"))]
+    pub(crate) fn ui_service(&self) -> &Arc<crate::ui::daemon::UiService> {
+        self.ui.as_ref().expect("ui feature")
+    }
+
     /// Binds to `socket_path` and serves RPC requests until shutdown.
-    pub async fn run(self, socket_path: &Path, idle_timeout: Duration) -> std::io::Result<()> {
+    /// `idle_timeout`: shut down after this long with no clients; `None` runs
+    /// until stopped.
+    pub async fn run(
+        self,
+        socket_path: &Path,
+        idle_timeout: Option<Duration>,
+    ) -> std::io::Result<()> {
         lifecycle::cleanup_stale_socket(socket_path)?;
 
         if let Some(parent) = socket_path.parent() {
@@ -103,16 +147,22 @@ impl DaemonServer {
         }
 
         let listener = UnixListener::bind(socket_path)?;
+        #[cfg(feature = "ui")]
+        if let Some(ui) = &self.ui {
+            ui.set_socket(socket_path);
+        }
         lifecycle::write_pid_file(&lifecycle::pid_path())?;
 
         tracing::info!(path = %socket_path.display(), "daemon listening");
 
-        tokio::spawn(lifecycle::idle_monitor(
-            self.last_activity.clone(),
-            self.connection_count.clone(),
-            idle_timeout,
-            self.shutdown_tx.clone(),
-        ));
+        if let Some(idle_timeout) = idle_timeout {
+            tokio::spawn(lifecycle::idle_monitor(
+                self.last_activity.clone(),
+                self.connection_count.clone(),
+                idle_timeout,
+                self.shutdown_tx.clone(),
+            ));
+        }
 
         let mut shutdown_rx = self.shutdown_tx.subscribe();
 
@@ -184,7 +234,7 @@ impl DaemonServer {
 
         self.connection_count.fetch_add(1, Ordering::Relaxed);
 
-        tokio::spawn(handle_connection(
+        tokio::spawn(handle_connection_with(
             self.search.clone(),
             self.storage.clone(),
             self.namespaces.clone(),
@@ -194,11 +244,40 @@ impl DaemonServer {
             self.last_activity.clone(),
             self.shutdown_tx.subscribe(),
             self.shutdown_tx.clone(),
+            self.ui.clone(),
         ));
     }
 }
 
+#[cfg_attr(feature = "ui", allow(dead_code))]
 async fn handle_connection(
+    search: Arc<dyn SearchPipeline>,
+    storage: Arc<dyn BridgeStorageEngine>,
+    namespaces: Arc<dyn NamespaceRegistry>,
+    health: Arc<dyn HealthChecker>,
+    stream: tokio::net::UnixStream,
+    connection_count: Arc<AtomicU32>,
+    last_activity: Arc<AtomicI64>,
+    shutdown_rx: watch::Receiver<bool>,
+    shutdown_tx: watch::Sender<bool>,
+) {
+    handle_connection_with(
+        search,
+        storage,
+        namespaces,
+        health,
+        stream,
+        connection_count,
+        last_activity,
+        shutdown_rx,
+        shutdown_tx,
+        UiHook::default(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_connection_with(
     search: Arc<dyn SearchPipeline>,
     storage: Arc<dyn BridgeStorageEngine>,
     namespaces: Arc<dyn NamespaceRegistry>,
@@ -208,7 +287,12 @@ async fn handle_connection(
     last_activity: Arc<AtomicI64>,
     mut shutdown_rx: watch::Receiver<bool>,
     shutdown_tx: watch::Sender<bool>,
+    ui: UiHook,
 ) {
+    #[cfg(feature = "ui")]
+    let ui_conn = ui.as_ref().map(|svc| svc.connect());
+    #[cfg(not(feature = "ui"))]
+    let _ = ui;
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut writer = writer;
@@ -267,10 +351,40 @@ async fn handle_connection(
                         } else if matches!(method.as_str(), "feedback_api1_v1" | "forget_api1_v1" | "store_api1_v1" | "store_batch_api1_v1") && peer_limit < MAX_MESSAGE_SIZE {
                             Err(BridgeError::TooLarge("API1 lifecycle requires full receipt frame negotiation before work".into()))
                         } else {
-                            dispatch_bounded(
-                                &*search, &*storage, &*namespaces, &*health,
-                                &request.method, request.params, Some(peer_limit),
-                            ).await
+                            #[cfg(feature = "ui")]
+                            let ui_answer = match (&ui, &ui_conn) {
+                                // Boxed: keeps the per-connection future as small as without `ui`.
+                                (Some(svc), Some(conn)) => Box::pin(svc.dispatch(conn, &method, &request.params)).await,
+                                _ => None,
+                            };
+                            #[cfg(not(feature = "ui"))]
+                            let ui_answer: Option<Result<serde_json::Value, BridgeError>> = None;
+                            match ui_answer {
+                                Some(answer) => answer,
+                                None => {
+                                    #[cfg(feature = "ui")]
+                                    let observed = match (&ui, &ui_conn) {
+                                        (Some(svc), Some(conn)) => svc.observe(conn, &method, &request.params),
+                                        _ => None,
+                                    };
+                                    let call = dispatch_bounded(
+                                        &*search, &*storage, &*namespaces, &*health,
+                                        &request.method, request.params, Some(peer_limit),
+                                    );
+                                    #[cfg(feature = "ui")]
+                                    let result = match (observed, &ui) {
+                                        (Some(obs), Some(svc)) => {
+                                            let result = Box::pin(crate::ui::events::scope(obs.ctx.clone(), call)).await;
+                                            svc.finish(obs, &result);
+                                            result
+                                        }
+                                        _ => call.await,
+                                    };
+                                    #[cfg(not(feature = "ui"))]
+                                    let result = call.await;
+                                    result
+                                }
+                            }
                         };
 
                         timeline.mark("transport.dispatch");
@@ -360,6 +474,13 @@ async fn handle_connection(
                 Ok::<_, ()>(true)
                 }).await;
                 if !matches!(outcome, Ok(true)) { break; }
+                #[cfg(feature = "ui")]
+                if let Some(params) = ui_conn.as_ref().and_then(|c| c.take_subscription()) {
+                    Box::pin(crate::ui::daemon::serve_subscription(
+                        &mut reader, &mut writer, params, peer_limit, shutdown_rx.clone(),
+                    )).await;
+                    break;
+                }
             }
             _ = shutdown_rx.changed() => break,
         }

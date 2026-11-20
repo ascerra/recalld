@@ -118,6 +118,12 @@ struct ClientState {
     api1_get: Option<bool>,
     exact_pairs_bits: bool,
     canonical_pages: bool,
+    /// Agent name announced with `hello` on the current connection.
+    #[cfg(feature = "ui")]
+    announced: Option<String>,
+    /// This client's name for `hello`; unnamed clients never send it.
+    #[cfg(feature = "ui")]
+    agent: Option<(String, &'static str)>,
 }
 
 #[derive(Clone, Copy)]
@@ -502,9 +508,19 @@ impl DaemonClient {
                 api1_get: None,
                 exact_pairs_bits: false,
                 canonical_pages: false,
+                #[cfg(feature = "ui")]
+                announced: None,
+                #[cfg(feature = "ui")]
+                agent: None,
             }),
             connected: AtomicBool::new(true),
         })
+    }
+
+    /// Name this client for the daemon's activity attribution (`hello`).
+    #[cfg(feature = "ui")]
+    pub async fn set_agent(&self, name: &str, kind: &'static str) {
+        self.state.lock().await.agent = Some((name.to_owned(), kind));
     }
 
     /// Whether the client currently holds a live connection.
@@ -752,6 +768,10 @@ impl DaemonClient {
     /// so this can never spin.
     async fn reconnect(&self, state: &mut ClientState) -> Result<(), BridgeError> {
         state.conn = None;
+        #[cfg(feature = "ui")]
+        {
+            state.announced = None;
+        }
         state.frame_limit = LEGACY_MAX_MESSAGE_SIZE;
         state.api1_lifecycle = None;
         state.api1_store = None;
@@ -808,6 +828,28 @@ impl DaemonClient {
 }
 
 impl ClientState {
+    /// Name this connection for the daemon's activity attribution, once.
+    /// A daemon without the UI rejects `hello`; that is ignored.
+    #[cfg(feature = "ui")]
+    async fn announce(&mut self) {
+        // Only clients explicitly named (`set_agent`) announce themselves;
+        // an unnamed client's frames are exactly what they were without `ui`.
+        let Some((agent, kind)) = self.agent.clone() else {
+            return;
+        };
+        if self.announced.as_deref() == Some(agent.as_str()) || self.conn.is_none() {
+            return;
+        }
+        self.announced = Some(agent.clone());
+        let mut hello = DaemonRequest {
+            jsonrpc: "2.0".into(),
+            id: 0,
+            method: "hello".into(),
+            params: serde_json::json!({ "agent": agent, "kind": kind }),
+        };
+        let _ = Box::pin(self.exchange(&mut hello)).await;
+    }
+
     /// Performs the handshake on a freshly established connection.
     ///
     /// Never recurses into reconnect: it drives [`ClientState::exchange`]
@@ -922,6 +964,10 @@ impl ClientState {
         request: &mut DaemonRequest,
     ) -> Result<serde_json::Value, ExchangeError> {
         let method = request.method.clone();
+        #[cfg(feature = "ui")]
+        if !matches!(method.as_str(), "hello" | "ping") {
+            self.announce().await;
+        }
         let limit = self.frame_limit;
         let id = self.send_request(request).await?;
 

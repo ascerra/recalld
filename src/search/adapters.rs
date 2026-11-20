@@ -567,6 +567,8 @@ impl RifProcessor for RifProcessorAdapter {
                 }
             }
         }
+        #[cfg(feature = "ui")]
+        crate::ui::events::suppressed(suppressions.iter().map(|s| s.target));
         suppressions
     }
 }
@@ -900,6 +902,16 @@ impl GraphReader for SharedGraphReader {
         let graph = self.graph.read();
         wait.complete();
         let graph = crate::performance::Hold::new("graph.lock_hold", graph);
+        #[cfg(feature = "ui")]
+        if crate::ui::events::tracing_recall() {
+            return Ok(traced_spread(
+                &graph,
+                seeds,
+                namespace,
+                &spreading_config(depth),
+                Some(records),
+            ));
+        }
         Ok(crate::graph::activation::spreading_activation_with_records(
             &graph,
             seeds,
@@ -972,6 +984,10 @@ impl GraphReader for SharedGraphReader {
         wait.complete();
         let graph = crate::performance::Hold::new("graph.lock_hold", graph);
         let config = spreading_config(graph_depth);
+        #[cfg(feature = "ui")]
+        if crate::ui::events::tracing_recall() {
+            return traced_spread(&graph, seeds, namespace_id, &config, None);
+        }
         crate::graph::activation::spreading_activation(&graph, seeds, namespace_id, &config)
     }
 
@@ -981,6 +997,27 @@ impl GraphReader for SharedGraphReader {
         // where it can be unit-tested against real nodes and edges.
         graph.supersedes_terminal(id)
     }
+}
+
+/// Spreading activation that also records seeds and spread steps for the
+/// local UI's recall light. Same results as the untraced call.
+#[cfg(feature = "ui")]
+fn traced_spread(
+    graph: &crate::graph::RelationshipGraph,
+    seeds: &[(MemoryId, f32)],
+    namespace: NamespaceId,
+    config: &crate::graph::SpreadingActivationConfig,
+    records: Option<&HashMap<MemoryId, CachedRecord>>,
+) -> Vec<(MemoryId, f32)> {
+    let mut steps = Vec::new();
+    let out = crate::graph::activation::spreading_activation_traced(
+        graph, seeds, namespace, config, records, &mut steps,
+    );
+    crate::ui::events::with_recall(|t| {
+        t.seeds.extend_from_slice(seeds);
+        t.steps.extend(steps);
+    });
+    out
 }
 
 // ── EntityIndexReader ─────────────────────────────────────────────

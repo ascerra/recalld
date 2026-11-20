@@ -557,6 +557,8 @@ impl DecaySweepRunner {
                 .await;
                 finish_work(&storage, work);
                 Self::log_result(&result);
+                #[cfg(feature = "ui")]
+                crate::ui::events::sweep_finished(&result, config.interval);
             }
             let mut interval = time::interval(config.interval);
             interval.tick().await;
@@ -594,6 +596,8 @@ impl DecaySweepRunner {
                 .await;
                 finish_work(&storage, work);
                 Self::log_result(&result);
+                #[cfg(feature = "ui")]
+                crate::ui::events::sweep_finished(&result, config.interval);
             }
         })
     }

@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::errors::AppError;
 use super::models::*;
-use super::state::{AppState, QueryInput, SearchQuery};
+use super::state::{AppState, NamespaceRegistry, QueryInput, SearchQuery, StorageEngine};
 use crate::health::report as health_report_compute;
 use crate::model::DecayPhase;
 use crate::model::constants::{
@@ -1886,15 +1886,33 @@ pub async fn health_report(
     State(state): State<AppState>,
     Query(params): Query<HealthReportQuery>,
 ) -> Result<Json<ApiResponse<HealthReport>>, AppError> {
-    let stamp = state.storage.effects_stamp().await?;
-    let result = async {
-        let start = Instant::now();
+    let start = Instant::now();
+    let report = compute_health_report(
+        state.storage.as_ref(),
+        state.namespaces.as_ref(),
+        params.namespace,
+    )
+    .await?;
+    Ok(Json(ApiResponse {
+        data: report,
+        took_us: Some(start.elapsed().as_micros() as u64),
+    }))
+}
 
+/// The decay health report for one namespace (or all), shared by
+/// `GET /health/report` and the daemon. Cached per scope as described on
+/// [`health_report`].
+pub async fn compute_health_report(
+    storage: &dyn StorageEngine,
+    namespaces: &dyn NamespaceRegistry,
+    namespace: Option<String>,
+) -> Result<HealthReport, AppError> {
+    let stamp = storage.effects_stamp().await?;
+    let result = async {
         // Resolve optional namespace filter (validate before cache check)
-        let namespace_filter: Option<NamespaceId> = if let Some(ref ns_name) = params.namespace {
+        let namespace_filter: Option<NamespaceId> = if let Some(ref ns_name) = namespace {
             Some(
-                state
-                    .namespaces
+                namespaces
                     .resolve(ns_name)
                     .ok_or_else(|| AppError::NotFound {
                         resource: "namespace",
@@ -1906,7 +1924,7 @@ pub async fn health_report(
             None
         };
 
-        let scope = params.namespace.unwrap_or_else(|| "all".to_string());
+        let scope = namespace.unwrap_or_else(|| "all".to_string());
 
         // --- Check cache ---
         {
@@ -1915,17 +1933,13 @@ pub async fn health_report(
                 if *cached_stamp == stamp
                     && generated_at.elapsed().as_secs() < HEALTH_REPORT_CACHE_TTL_SECS
                 {
-                    let took = start.elapsed().as_micros() as u64;
-                    return Ok(Json(ApiResponse {
-                        data: cached_report.clone(),
-                        took_us: Some(took),
-                    }));
+                    return Ok(cached_report.clone());
                 }
             }
         }
 
         // --- Cache miss: compute the report ---
-        let all_records = state.storage.scan_all().await?;
+        let all_records = storage.scan_all().await?;
 
         // Filter records by namespace if applicable
         let filtered: Vec<_> = all_records
@@ -1940,20 +1954,15 @@ pub async fn health_report(
             .collect();
 
         let overview = health_report_compute::compute_overview(&filtered);
-        let decay_forecast =
-            health_report_compute::compute_decay_forecast(&filtered, state.namespaces.as_ref());
-        let at_risk = health_report_compute::compute_at_risk(&filtered, state.namespaces.as_ref());
+        let decay_forecast = health_report_compute::compute_decay_forecast(&filtered, namespaces);
+        let at_risk = health_report_compute::compute_at_risk(&filtered, namespaces);
         let age_distribution = health_report_compute::compute_age_distribution(&filtered);
-        let storage = health_report_compute::compute_storage_breakdown(
-            state.storage.as_ref(),
-            state.namespaces.as_ref(),
-            namespace_filter,
-        )
-        .await;
-        let metadata =
-            health_report_compute::compute_metadata_stats(state.storage.as_ref(), namespace_filter)
-                .await
-                .map_err(|e| AppError::Internal { source: e })?;
+        let storage_breakdown =
+            health_report_compute::compute_storage_breakdown(storage, namespaces, namespace_filter)
+                .await;
+        let metadata = health_report_compute::compute_metadata_stats(storage, namespace_filter)
+            .await
+            .map_err(|e| AppError::Internal { source: e })?;
 
         let report = HealthReport {
             scope: scope.clone(),
@@ -1961,7 +1970,7 @@ pub async fn health_report(
             decay_forecast,
             at_risk,
             age_distribution,
-            storage,
+            storage: storage_breakdown,
             metadata,
         };
 
@@ -1971,15 +1980,10 @@ pub async fn health_report(
             cache.insert(scope, (stamp, Instant::now(), report.clone()));
         }
 
-        let took = start.elapsed().as_micros() as u64;
-
-        Ok(Json(ApiResponse {
-            data: report,
-            took_us: Some(took),
-        }))
+        Ok(report)
     }
     .await;
-    if state.storage.effects_stamp().await? != stamp {
+    if storage.effects_stamp().await? != stamp {
         return Err(crate::storage::StorageError::RecoveryRequired(
             "effects changed during health report".into(),
         )

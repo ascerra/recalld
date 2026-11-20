@@ -514,7 +514,7 @@ The socket is at `$XDG_RUNTIME_DIR/recalld/recalld.sock` on Linux, and at `~/.re
 # Start in background (default)
 recalld daemon start
 
-# Start with custom idle timeout (minutes, 0 = no timeout)
+# Shut down after 60 idle minutes (default 0: keep running)
 recalld daemon start --idle-timeout 60
 
 # Start in foreground (useful for debugging)
