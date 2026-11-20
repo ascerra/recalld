@@ -118,8 +118,6 @@ pub struct LatencyMs {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessStatus {
     pub rss_bytes: Option<u64>,
-    /// Percent of one core since the previous `system_status` (or since start).
-    pub cpu_percent: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

@@ -41,7 +41,6 @@ pub struct UiService {
     socket: std::sync::OnceLock<String>,
     clients: Mutex<BTreeMap<u64, ClientInfo>>,
     next_client: AtomicU64,
-    cpu_sample: Mutex<Option<(Instant, f64)>>,
 }
 
 impl UiService {
@@ -79,7 +78,6 @@ impl UiService {
             socket: std::sync::OnceLock::new(),
             clients: Mutex::new(BTreeMap::new()),
             next_client: AtomicU64::new(1),
-            cpu_sample: Mutex::new(None),
         }
     }
 
@@ -358,18 +356,6 @@ impl UiService {
         } else {
             (self.config.decay.sweep_interval_hours * 3600.0) as u64
         };
-        let cpu_percent = crate::ui::sysinfo::cpu_seconds().map(|cpu| {
-            let now = Instant::now();
-            let mut sample = self.cpu_sample.lock().unwrap_or_else(|e| e.into_inner());
-            let (since, before) = sample.unwrap_or((self.started, 0.0));
-            *sample = Some((now, cpu));
-            let wall = now.duration_since(since).as_secs_f64();
-            if wall > 0.0 {
-                ((cpu - before) / wall * 100.0).max(0.0)
-            } else {
-                0.0
-            }
-        });
         SystemStatus {
             version: env!("CARGO_PKG_VERSION").into(),
             protocol_version: crate::daemon::protocol::PROTOCOL_VERSION,
@@ -393,7 +379,6 @@ impl UiService {
             },
             process: ProcessStatus {
                 rss_bytes: crate::ui::sysinfo::rss_bytes(),
-                cpu_percent,
             },
             clients: self
                 .clients

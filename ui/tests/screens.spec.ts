@@ -11,7 +11,7 @@ const masks = (page: Page) => [
   page.locator('.mono.t'), // stream times
   page.locator('td.last'), // "accessed 3d ago"
   page.locator('.status.mono'),
-  page.locator('.tv, .tc'), // system tiles (uptime, RSS, CPU)
+  page.locator('.tv, .tc'), // system tiles (uptime, RSS)
   page.locator('.meta, .caption'), // relative next-change phrases
   page.locator('section[aria-label="Memories over time"] svg'), // weekly buckets move with the date
 ];

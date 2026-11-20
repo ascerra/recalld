@@ -65,7 +65,7 @@ are read-only and never record access.
 |---|---|---|
 | `graph_snapshot { namespace? }` | `{ nodes: { ids[], ns[], phase[], strength[], decayStrength[], stability[], createdAt[], lastAccess[], degree[], permastore[] }, edges: { src[], dst[], type[], weight[] } }` | Column arrays (indices into `nodes`) for compact transfer. Read from the in-memory `RelationshipGraph` plus the cache. All namespaces when `namespace` is omitted. Gzip over HTTP. Must handle 50k nodes / 500k edges in < 300ms server time. |
 | `health_report { namespace? }` | the existing `HealthReport` (`src/api/models.rs`) | Port the HTTP handler (`src/api/handlers.rs` `health_report`) so the daemon can serve it; reuse its cache. |
-| `system_status` | version (`CARGO_PKG_VERSION`), protocol version, uptime, data dir, bind/socket, subsystem health (existing `check_health`), cache hits/misses/budget (from the metrics registry), embedding provider/model/latency, **process RSS and CPU** (new: `getrusage` / `/proc/self`), **connected clients** (new: name + since) | Powers Health → System. |
+| `system_status` | version (`CARGO_PKG_VERSION`), protocol version, uptime, data dir, bind/socket, subsystem health (existing `check_health`), cache hits/misses/budget (from the metrics registry), embedding provider/model/latency, **process RSS** (new: `proc_pidinfo` / `/proc/self`), **connected clients** (new: name + since) | Powers Health → System. |
 | `memory_neighbors { id, depth ≤ 2 }` | local subgraph | Detail panel "Local graph". |
 | `access_history { id, limit }` | recent access events with kind and agent | Detail panel activity. |
 | `subscribe { kinds[] }` | stream of event notifications (below) | A long-lived connection that receives server-initiated JSON-RPC notifications. The daemon protocol doesn't have notifications yet; add them for this connection type only. |
@@ -136,7 +136,7 @@ report `AGENTS.md` requires.
 ### Phase 1 — Foundations (backend + shell)
 - `ui` feature, `src/ui/` module, `recalld ui` command, token/Host security, asset embedding, SSE
   plumbing (heartbeat only).
-- Daemon methods: `graph_snapshot`, `health_report`, `system_status` (RSS/CPU/clients included).
+- Daemon methods: `graph_snapshot`, `health_report`, `system_status` (RSS/clients included).
 - `ts-rs` type generation.
 - `ui/` scaffold: routes, tokens, fonts, favicon set from `ui/static/` (`<link rel="icon" href="/favicon.svg" type="image/svg+xml">`, `.ico` + apple-touch fallbacks), sidebar with the bulb logo (collapsible, global namespace scope), page header
   with Search field, ⌘K / `/` shortcut wiring (palette stub), daemon-unavailable banner.

@@ -38,11 +38,7 @@ latencyMs: LatencyMs | null, };
 
 export type LatencyMs = { last: number, smoothed: number, };
 
-export type ProcessStatus = { rssBytes: number | null, 
-/**
- * Percent of one core since the previous `system_status` (or since start).
- */
-cpuPercent: number | null, };
+export type ProcessStatus = { rssBytes: number | null, };
 
 export type ClientInfo = { id: number, 
 /**

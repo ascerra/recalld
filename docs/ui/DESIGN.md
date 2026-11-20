@@ -196,7 +196,7 @@ Row 1: **Memories** card (display number, phase bar, Full/Summary/Ghost/Tombston
 and a **Coming up** card (phase changes expected in 7 / 30 / 90 days, straight from
 `/health/report.decayForecast`; zeros greyed). Row 2: **Fading soon** (soonest transitions, with
 Reinforce on each) and **Storage** (stacked bar + meta.db / vectors / edges.db / text log). Row 3:
-**System** — tiles for Version, Uptime, Memory (RSS), CPU, Cache hit rate, Embedding latency;
+**System** — tiles for Version, Uptime, Memory (RSS), Embedding latency;
 per-subsystem status dots; connected agents; next decay sweep.
 
 ## 9. Words

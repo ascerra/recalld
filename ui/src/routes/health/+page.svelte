@@ -152,7 +152,6 @@
         <div class="tile"><span class="tl">Version</span><span class="tv">{s.version}</span><span class="tc">daemon · protocol v{s.protocolVersion}</span></div>
         <div class="tile"><span class="tl">Uptime</span><span class="tv">{uptime(s.uptimeSecs)}</span><span class="tc">since {since(s.startedAt)}</span></div>
         <div class="tile"><span class="tl">Memory</span><span class="tv">{s.process.rssBytes !== null ? bytes(s.process.rssBytes) : '—'}</span><span class="tc">resident</span></div>
-        <div class="tile"><span class="tl">CPU</span><span class="tv">{s.process.cpuPercent !== null ? `${s.process.cpuPercent.toFixed(1)}%` : '—'}</span><span class="tc">since the last check</span></div>
         <div class="tile"><span class="tl">Embedding</span><span class="tv">{s.embedding.latencyMs ? `${Math.round(s.embedding.latencyMs.smoothed)} ms` : '—'}</span><span class="tc mono">{s.embedding.model}</span></div>
       </div>
       <div class="sys-row">

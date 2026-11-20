@@ -303,7 +303,6 @@ async fn contract_system_status_and_clients() {
     assert_eq!(status.version, env!("CARGO_PKG_VERSION"));
     assert_eq!(status.socket, d.socket.display().to_string());
     assert!(status.process.rss_bytes.is_some_and(|b| b > 0));
-    assert!(status.process.cpu_percent.is_some());
     assert!(
         status
             .clients
