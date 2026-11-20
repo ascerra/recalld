@@ -72,7 +72,8 @@ enum Command {
         ///
         /// If a directory, generates timestamped filename automatically.
         /// If a file path ending in .zip, uses that exact name.
-        #[arg(short, long)]
+        /// Long form only: `-d` is the global `--data-dir`.
+        #[arg(long)]
         destination: std::path::PathBuf,
 
         /// Override the data directory to back up
@@ -1420,4 +1421,33 @@ fn init_tracing(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn backup_accepts_global_data_dir_short_flag() {
+        let cli = Cli::try_parse_from([
+            "recalld",
+            "backup",
+            "-d",
+            "/data",
+            "--destination",
+            "out.zip",
+        ])
+        .expect("`backup -d` is the global --data-dir");
+        assert_eq!(cli.data_dir.as_deref(), Some("/data"));
+        let Some(Command::Backup { destination, .. }) = cli.command else {
+            panic!("expected backup");
+        };
+        assert_eq!(destination, std::path::PathBuf::from("out.zip"));
+    }
 }
