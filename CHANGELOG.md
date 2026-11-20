@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Local web UI
+
+- The memory map starts with memories active in the last 90 days, so large, densely linked stores lay out calmly. **Active in** widens it to 7 days, 30 days, 1 year or all time; memories outside the window leave the layout, not just the view.
+
 ### Fixed
 
 - Decay sweeps on 2.x stores no longer stall for minutes. A startup or timer pass publishes derived views in batches of `write_batch_size` instead of after every memory (#220), and each commit reads only the memory's graph neighbourhood instead of every record and edge. Reads and writes are still refused while a pass runs, now for seconds rather than minutes on a store of about 1,200 memories. (#215)

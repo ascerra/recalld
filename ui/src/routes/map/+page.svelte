@@ -10,7 +10,7 @@
   import Icon from '$lib/components/Icon.svelte';
   import { scope } from '$lib/scope.svelte';
   import { selection } from '$lib/selection.svelte';
-  import { fetchGraph } from '$lib/api/snapshot';
+  import { fetchGraph, activeSince } from '$lib/api/snapshot';
   import { phaseName, truncateWords, count } from '$lib/format';
   import { EDGE_LABELS, EDGE } from '$lib/map/encoding';
   import { memoryRows } from '$lib/api/memories';
@@ -25,7 +25,7 @@
   // Dev simulator: /map?simulate=5 emits five synthetic recalls a second.
   $effect(() => {
     const rate = Number(page.url.searchParams.get('simulate') ?? 0);
-    if (rate > 0 && graph.data) return simulate(graph.data, rate);
+    if (rate > 0 && shown) return simulate(shown, rate);
   });
   let tick = $state(Date.now());
   $effect(() => {
@@ -48,6 +48,20 @@
     queryFn: () => fetchGraph(scope.current),
     staleTime: 60_000,
   }));
+
+  // Large stores start with the last 90 days of activity: fewer nodes keep the
+  // physics calm. The Window menu widens it to everything.
+  const WINDOWS = [
+    { days: 7, label: '7 days' },
+    { days: 30, label: '30 days' },
+    { days: 90, label: '90 days' },
+    { days: 365, label: '1 year' },
+    { days: 0, label: 'All time' },
+  ];
+  let windowDays = $state(90);
+  const shown = $derived(
+    graph.data && windowDays > 0 ? activeSince(graph.data, graph.data.generatedAt - windowDays * 86_400_000) : graph.data,
+  );
 
   let phases = $state(new Set([1, 2, 3]));
   const togglePhase = (p: number) => {
@@ -82,6 +96,7 @@
   $effect(() => {
     const id = page.url.searchParams.get('id');
     if (id) {
+      if (graph.data?.index.has(id) && !shown?.index.has(id)) windowDays = 0;
       selection.select(id);
       panelOpen = true;
       if (settled) map?.center(id);
@@ -110,7 +125,14 @@
 <svelte:window {onkeydown} />
 
 <Screen>
-  <PageHeader title="Memory map" meta={graph.data ? `${count(graph.data.ids.length)} memories` : undefined} />
+  <PageHeader
+    title="Memory map"
+    meta={graph.data && shown
+      ? shown.ids.length === graph.data.ids.length
+        ? `${count(graph.data.ids.length)} memories`
+        : `${count(shown.ids.length)} of ${count(graph.data.ids.length)} memories`
+      : undefined}
+  />
 
   <div role="toolbar" aria-label="Graph filters" class="toolbar">
     <ScopeChip />
@@ -124,6 +146,12 @@
       bind:selected={linkSel}
       showCount={false}
     />
+    <label class="window">
+      <span>Active in</span>
+      <select bind:value={windowDays} aria-label="Show memories active in">
+        {#each WINDOWS as w (w.days)}<option value={w.days}>{w.label}</option>{/each}
+      </select>
+    </label>
     <div class="scrubber">
       <label for="decay-scrub">Decay</label>
       <input id="decay-scrub" type="range" min="0" max="365" step="1" bind:value={days} aria-valuetext={daysLabel} />
@@ -138,7 +166,12 @@
       <div class="state muted">The map could not load: {graph.error.message}</div>
     {:else if graph.data && graph.data.ids.length === 0}
       <div class="state muted">No memories in this scope yet. Agents add them with store_memory.</div>
-    {:else if graph.data}
+    {:else if shown && shown.ids.length === 0}
+      <div class="state muted">
+        No memories active in the last {WINDOWS.find((w) => w.days === windowDays)?.label}.
+        <button type="button" class="link" onclick={() => (windowDays = 0)}>Show all time</button>
+      </div>
+    {:else if shown}
       {#if pill}
         <button type="button" class="pill" class:quiet={!pill.recent} title="Replay in slow motion" onclick={() => live.replay(pill.event)}>
           <span class="pill-dot"></span>{pill.who} · {pill.verb} · {pill.when}
@@ -149,11 +182,11 @@
       {#if localGraph}
         <button type="button" class="pill back" onclick={() => map?.exitFocus()}>← Back</button>
       {/if}
-      {#key graph.data}
+      {#key shown}
         {#await import('$lib/map/MemoryMap.svelte') then { default: MemoryMap }}
           <MemoryMap
             bind:this={map}
-            snapshot={graph.data}
+            snapshot={shown}
             scopeKey={scope.current}
             selectedId={selection.id}
             projectionDays={days}
@@ -206,6 +239,30 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2);
+  }
+  .window {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-control);
+    color: var(--color-text-muted);
+  }
+  .window select {
+    font: inherit;
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: var(--hairline) solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2);
+  }
+  .state .link {
+    font: inherit;
+    color: var(--color-accent);
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
   }
   .scrubber {
     display: flex;
