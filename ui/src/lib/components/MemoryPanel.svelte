@@ -1,11 +1,14 @@
-<!-- Detail panel for the selected memory (DESIGN §2, §8). Reads are
+<!-- Detail for the selected memory (DESIGN §2, §8): a side panel on the map,
+     an expanded row in Explore (`layout="inline"`, which shows more: full
+     text, every label, links and a longer activity list). Reads are
      read-only; Reinforce and Forget are the only writes, Forget confirms. -->
 <script lang="ts">
   import { createQuery, useQueryClient } from '@tanstack/svelte-query';
   import { AlertDialog, DropdownMenu } from 'bits-ui';
   import Icon from './Icon.svelte';
   import DecayCurve from './DecayCurve.svelte';
-  import { forget, memoryHistory, memoryRecord, memoryRows, reinforce } from '$lib/api/memories';
+  import { forget, memoryHistory, memoryNeighbors, memoryRecord, memoryRows, reinforce } from '$lib/api/memories';
+  import { EDGE_LABELS } from '$lib/map/encoding';
   import { ago, duration, phaseName } from '$lib/format';
   import { DAY_MS, strengthAt } from '$lib/fsrs';
 
@@ -13,12 +16,21 @@
     id,
     onclose,
     secondary,
+    layout = 'panel',
+    heading = false,
+    onopen,
   }: {
     id: string;
     onclose: () => void;
     /** "Show on map" in Explore, "Local graph" on the map. */
     secondary: { label: string; onclick: () => void };
+    layout?: 'panel' | 'inline';
+    /** Inline only: show the summary as a title, for when no row above shows it. */
+    heading?: boolean;
+    /** Inline only: open a linked memory. */
+    onopen?: (id: string) => void;
   } = $props();
+  const inline = $derived(layout === 'inline');
 
   const client = useQueryClient();
   const row = createQuery(() => ({
@@ -26,7 +38,24 @@
     queryFn: async () => (await memoryRows([id]))[0] ?? null,
   }));
   const record = createQuery(() => ({ queryKey: ['memory', id], queryFn: () => memoryRecord(id) }));
-  const history = createQuery(() => ({ queryKey: ['history', id], queryFn: () => memoryHistory(id, 3) }));
+  const history = createQuery(() => ({ queryKey: ['history', id, inline], queryFn: () => memoryHistory(id, inline ? 12 : 3) }));
+  // Direct links, strongest first (inline only).
+  const neighbors = createQuery(() => ({
+    queryKey: ['neighbors', id, 1],
+    queryFn: () => memoryNeighbors(id, 1),
+    enabled: inline,
+  }));
+  const links = $derived.by(() => {
+    const n = neighbors.data;
+    if (!n) return [];
+    const byId = new Map(n.nodes.map((x) => [x.id, x]));
+    return n.edges
+      .filter((e) => e.src === id || e.dst === id)
+      .map((e) => ({ ...e, other: byId.get(e.src === id ? e.dst : e.src) }))
+      .filter((e) => e.other)
+      .sort((a, b) => b.weight - a.weight);
+  });
+  const fmtDate = (t: number) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   let showFull = $state(false);
   let previous = $state<number | null>(null);
@@ -88,6 +117,141 @@
   }
 </script>
 
+{#snippet curve(m: NonNullable<typeof row.data>)}
+  <figure>
+    <div class="fig-head">
+      <span class="card-title">Retrievability</span>
+      <span class="mono values">R {r.toFixed(2)} · S {duration(m.stability)}{m.permastore ? ' · permastore' : ''}</span>
+    </div>
+    <DecayCurve stability={m.stability} elapsedDays={elapsed} previousStability={previous} />
+    <figcaption>
+      {m.nextChange ? `${phaseName(m.nextChange.to)} ${m.nextChange.at <= Date.now() ? 'at the next sweep' : `in ${duration((m.nextChange.at - Date.now()) / DAY_MS)}`}` : m.permastore ? 'In permastore' : 'No change expected'}
+      · created {fmtDate(m.createdAt)}
+    </figcaption>
+  </figure>
+{/snippet}
+
+{#snippet activity()}
+  <section class="activity" aria-label="Recent activity">
+    <span class="micro-label">Activity</span>
+    {#each acts as e, i (i)}
+      <div class="act">
+        <span class="mono t">{ago(e.at)}</span>
+        <span>
+          {#if e.kind !== 'sweep'}{e.agent ?? 'An agent'}{/if}
+          <span class="muted">{KINDS[e.kind] ?? e.kind}{e.n > 1 ? ` · ${e.n}×` : ''}</span>
+          {#if e.query}<span class="q">“{e.query}”</span>{/if}
+        </span>
+      </div>
+    {:else}
+      <span class="muted small">No access recorded yet.</span>
+    {/each}
+  </section>
+{/snippet}
+
+{#snippet actions(m: NonNullable<typeof row.data>)}
+  {#if error}<p class="error" role="alert">{error}</p>{/if}
+  <div class="actions">
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger class="btn-primary grow" disabled={busy}>Reinforce</DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content class="menu" sideOffset={6} align="start">
+          {#each [[4, 'Easy'], [3, 'Good'], [2, 'Hard'], [1, 'Again']] as [q, label] (q)}
+            <DropdownMenu.Item class="menu-item" onSelect={() => doReinforce(q as number)}>{label}</DropdownMenu.Item>
+          {/each}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+    <button type="button" class="btn-secondary grow" onclick={secondary.onclick}>{secondary.label}</button>
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger class="btn-secondary square" aria-label="More actions"><Icon name="more" /></DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content class="menu" sideOffset={6} align="end">
+          <DropdownMenu.Item class="menu-item" onSelect={() => (confirming = true)}>Forget…</DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  </div>
+
+  <AlertDialog.Root bind:open={confirming}>
+    <AlertDialog.Portal>
+      <AlertDialog.Overlay class="dialog-scrim" />
+      <AlertDialog.Content class="dialog">
+        <AlertDialog.Title class="card-title">Forget this memory?</AlertDialog.Title>
+        <AlertDialog.Description class="dialog-text">
+          “{m.summary ?? 'Summary dropped'}” becomes a tombstone: its content is removed and it no longer appears in recall.
+        </AlertDialog.Description>
+        <div class="dialog-actions">
+          <AlertDialog.Cancel class="btn-secondary">Keep it</AlertDialog.Cancel>
+          <AlertDialog.Action class="btn-primary" disabled={busy} onclick={doForget}>Forget</AlertDialog.Action>
+        </div>
+      </AlertDialog.Content>
+    </AlertDialog.Portal>
+  </AlertDialog.Root>
+{/snippet}
+
+{#if inline}
+  <section class="detail" aria-label="Memory details">
+    {#if row.isPending}
+      <div class="skeleton block"></div>
+    {:else if !row.data}
+      <p class="muted">This memory no longer exists.</p>
+    {:else}
+      {@const m = row.data}
+      {#if heading}
+        <div class="inline-head">
+          <h2 class:ghost={m.summary === null}>{m.summary ?? 'Summary dropped'}</h2>
+          <button type="button" class="icon-btn" aria-label="Close details" onclick={onclose}><Icon name="close" stroke={1.8} /></button>
+        </div>
+      {/if}
+      <div class="col">
+        <span class="micro-label">Content</span>
+        {#if record.data?.fullText}
+          <p class="full">{record.data.fullText}</p>
+        {:else}
+          <p class="muted small">{m.phase === 1 ? 'No full text stored.' : 'Full text dropped when it decayed to a Summary.'}</p>
+        {/if}
+        {#if m.entities.length}
+          <div class="labels"><span class="micro-label">Entities</span>{#each m.entities as e (e)}<span class="tag">{e}</span>{/each}</div>
+        {/if}
+        {#if m.tags.length}
+          <div class="labels"><span class="micro-label">Tags</span>{#each m.tags as t (t)}<span class="tag">{t}</span>{/each}</div>
+        {/if}
+        <dl class="facts">
+          <div><dt>Namespace</dt><dd class="mono">{m.namespace}</dd></div>
+          <div><dt>Created</dt><dd class="mono">{fmtDate(m.createdAt)}</dd></div>
+          <div><dt>Last accessed</dt><dd class="mono">{ago(m.lastAccessedAt)}</dd></div>
+          <div><dt>Stability</dt><dd class="mono">{duration(m.stability)}</dd></div>
+          <div><dt>ID</dt><dd class="mono id">{m.id}</dd></div>
+        </dl>
+      </div>
+      <div class="col">
+        {@render curve(m)}
+        {@render activity()}
+      </div>
+      <div class="col">
+        <span class="micro-label">Links · {m.degree}</span>
+        {#if neighbors.isPending}
+          <span class="skeleton line"></span>
+        {:else}
+          <ul class="links">
+            {#each links.slice(0, 10) as l, i (i)}
+              <li>
+                <button type="button" class="link-row" onclick={() => onopen?.(l.other!.id)} title="Open this memory">
+                  <span class="mono kind">{EDGE_LABELS[l.type] ?? l.type}</span><span class="other" class:ghost={l.other!.summary === null}>{l.other!.summary ?? 'Summary dropped'}</span><span class="mono w">{l.weight.toFixed(2)}</span>
+                </button>
+              </li>
+            {:else}
+              <li class="muted small">No links.</li>
+            {/each}
+          </ul>
+          {#if links.length > 10}<span class="muted small">and {links.length - 10} more</span>{/if}
+        {/if}
+        {@render actions(m)}
+      </div>
+    {/if}
+  </section>
+{:else}
 <aside class="panel" aria-label="Selected memory">
   {#if row.isPending}
     <div class="skeleton line"></div>
@@ -112,75 +276,12 @@
       {/if}
     </div>
 
-    <figure>
-      <div class="fig-head">
-        <span class="card-title">Retrievability</span>
-        <span class="mono values">R {r.toFixed(2)} · S {duration(m.stability)}{m.permastore ? ' · permastore' : ''}</span>
-      </div>
-      <DecayCurve stability={m.stability} elapsedDays={elapsed} previousStability={previous} />
-      <figcaption>
-        {m.nextChange ? `${phaseName(m.nextChange.to)} ${m.nextChange.at <= Date.now() ? 'at the next sweep' : `in ${duration((m.nextChange.at - Date.now()) / DAY_MS)}`}` : m.permastore ? 'In permastore' : 'No change expected'}
-        · created {new Date(m.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-      </figcaption>
-    </figure>
-
-    <section class="activity" aria-label="Recent activity">
-      <span class="micro-label">Activity</span>
-      {#each acts as e, i (i)}
-        <div class="act">
-          <span class="mono t">{ago(e.at)}</span>
-          <span>
-            {#if e.kind !== 'sweep'}{e.agent ?? 'An agent'}{/if}
-            <span class="muted">{KINDS[e.kind] ?? e.kind}{e.n > 1 ? ` · ${e.n}×` : ''}</span>
-            {#if e.query}<span class="q">“{e.query}”</span>{/if}
-          </span>
-        </div>
-      {:else}
-        <span class="muted small">No access recorded yet.</span>
-      {/each}
-    </section>
-
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
-
-    <div class="actions">
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger class="btn-primary grow" disabled={busy}>Reinforce</DropdownMenu.Trigger>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content class="menu" sideOffset={6} align="start">
-            {#each [[4, 'Easy'], [3, 'Good'], [2, 'Hard'], [1, 'Again']] as [q, label] (q)}
-              <DropdownMenu.Item class="menu-item" onSelect={() => doReinforce(q as number)}>{label}</DropdownMenu.Item>
-            {/each}
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
-      <button type="button" class="btn-secondary grow" onclick={secondary.onclick}>{secondary.label}</button>
-      <DropdownMenu.Root>
-        <DropdownMenu.Trigger class="btn-secondary square" aria-label="More actions"><Icon name="more" /></DropdownMenu.Trigger>
-        <DropdownMenu.Portal>
-          <DropdownMenu.Content class="menu" sideOffset={6} align="end">
-            <DropdownMenu.Item class="menu-item" onSelect={() => (confirming = true)}>Forget…</DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Portal>
-      </DropdownMenu.Root>
-    </div>
-
-    <AlertDialog.Root bind:open={confirming}>
-      <AlertDialog.Portal>
-        <AlertDialog.Overlay class="dialog-scrim" />
-        <AlertDialog.Content class="dialog">
-          <AlertDialog.Title class="card-title">Forget this memory?</AlertDialog.Title>
-          <AlertDialog.Description class="dialog-text">
-            “{m.summary ?? 'Summary dropped'}” becomes a tombstone: its content is removed and it no longer appears in recall.
-          </AlertDialog.Description>
-          <div class="dialog-actions">
-            <AlertDialog.Cancel class="btn-secondary">Keep it</AlertDialog.Cancel>
-            <AlertDialog.Action class="btn-primary" disabled={busy} onclick={doForget}>Forget</AlertDialog.Action>
-          </div>
-        </AlertDialog.Content>
-      </AlertDialog.Portal>
-    </AlertDialog.Root>
+    {@render curve(m)}
+    {@render activity()}
+    {@render actions(m)}
   {/if}
 </aside>
+{/if}
 
 <style>
   .panel {
@@ -314,6 +415,151 @@
     width: var(--button-h);
     padding: 0;
     color: var(--color-text-2);
+  }
+  .detail {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-7);
+    padding: var(--space-6) var(--space-5) var(--space-7);
+    white-space: normal;
+    cursor: default;
+    /* Easy to read: body size, dark text, roomy lines. */
+    font-size: var(--text-body);
+    line-height: 1.55;
+    color: var(--color-text);
+  }
+  .detail h2 {
+    font-size: var(--text-section);
+  }
+  .detail .micro-label {
+    color: var(--color-text-2);
+  }
+  .detail .act,
+  .detail .small,
+  .detail figcaption {
+    font-size: var(--text-body);
+  }
+  .detail .t,
+  .detail .values {
+    font-size: var(--text-value);
+    color: var(--color-text-2);
+  }
+  .detail .muted {
+    color: var(--color-text-2);
+  }
+  .inline-head {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+  .detail .full {
+    max-height: calc(var(--space-8) * 7);
+    overflow: auto;
+    font-size: var(--text-input);
+    line-height: 1.6;
+    color: var(--color-text);
+  }
+  .labels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .tag {
+    padding: 0 var(--space-2);
+    border: var(--hairline) solid var(--color-border-strong);
+    border-radius: var(--radius-pill);
+    font-size: var(--text-control);
+    color: var(--color-text);
+  }
+  .facts {
+    margin: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .facts div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+  .facts dt {
+    color: var(--color-text-2);
+  }
+  .facts dd {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .id {
+    font-size: var(--text-value);
+  }
+  .links {
+    margin: 0 calc(var(--space-2) * -1);
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+  }
+  .link-row {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-3);
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    font: inherit;
+    color: var(--color-text);
+    text-align: left;
+    cursor: pointer;
+  }
+  .link-row:hover,
+  .link-row:focus-visible {
+    background: var(--color-surface);
+  }
+  .links .kind {
+    flex: 0 0 auto;
+    min-width: calc(var(--space-8) * 1.5);
+    font-size: var(--text-value);
+    color: var(--color-text-2);
+  }
+  .links .other {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .links .other.ghost {
+    font-style: italic;
+    color: var(--color-text-muted);
+  }
+  .links .w {
+    font-size: var(--text-value);
+    color: var(--color-text-2);
+  }
+  .detail .actions {
+    margin-top: auto;
+  }
+  @media (max-width: 1100px) {
+    .detail {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 700px) {
+    .detail {
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
   .skeleton.line {
     height: var(--space-3);

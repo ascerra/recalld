@@ -22,22 +22,28 @@ test('works from the keyboard alone', async ({ page }) => {
   const first = page.locator('tbody tr.row').first().getByRole('button');
   await first.focus();
   await page.keyboard.press('Enter');
-  const panel = page.getByRole('complementary', { name: 'Selected memory' });
-  await expect(panel).toBeVisible();
-  const title = await panel.getByRole('heading').textContent();
+  // The row opens in place with its details.
+  const details = page.getByRole('region', { name: 'Memory details' });
+  await expect(details).toBeVisible();
+  const selected = page.locator('tbody tr.row.selected');
+  await expect(selected).toHaveCount(1);
+  // Compare ids, not text: two memories can share a summary.
+  const id = await selected.getByRole('button').getAttribute('data-id');
   await page.keyboard.press('ArrowDown');
-  await expect(panel.getByRole('heading')).not.toHaveText(title!);
-  await expect(page.locator('tbody tr.row.selected')).toHaveCount(1);
+  await expect(selected.getByRole('button')).not.toHaveAttribute('data-id', id!);
+  await expect(selected).toHaveCount(1);
+  await expect(details).toHaveCount(1);
   await page.keyboard.press('Escape');
-  await expect(panel).toBeHidden();
+  await expect(details).toBeHidden();
 });
 
-test('the detail panel shows the decay curve and recent activity', async ({ page }) => {
+test('an opened row shows the decay curve, links and actions', async ({ page }) => {
   await open(page, '/explore?sort=summary');
   await page.getByRole('button', { name: 'Connection bonus keeps well-linked memories in Full' }).click();
-  const panel = page.getByRole('complementary', { name: 'Selected memory' });
+  const panel = page.getByRole('region', { name: 'Memory details' });
   await expect(panel.getByRole('img', { name: 'Forgetting curve for the selected memory' })).toBeVisible();
   await expect(panel.getByText(/^R \d\.\d\d · S /)).toBeVisible();
+  await expect(panel.getByText(/^Links · \d+/)).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Reinforce' })).toBeVisible();
   await panel.getByRole('button', { name: 'More actions' }).click();
   await page.getByRole('menuitem', { name: 'Forget…' }).click();

@@ -146,7 +146,7 @@
   </div>
 
   <section aria-label="System" class="card">
-    <div class="head wrap"><h2 class="card-title">System</h2><span class="mono meta">{s ? `${s.dataDir} · ${s.socket}` : ''}</span></div>
+    <div class="head wrap"><h2 class="card-title">System</h2></div>
     {#if s}
       <div class="tiles">
         <div class="tile"><span class="tl">Version</span><span class="tv">{s.version}</span><span class="tc">daemon · protocol v{s.protocolVersion}</span></div>
@@ -156,6 +156,7 @@
       </div>
       <div class="sys-row">
         <div class="subsystems" aria-label="Subsystems">
+          <span class="micro-label">Subsystems</span>
           {#each s.health.subsystems as sub (sub.name)}
             <span class="sub" title={sub.message ?? ''}><span class="sdot" class:down={sub.status !== 'ok' && sub.status !== 'up'}></span>{sub.name}</span>
           {/each}

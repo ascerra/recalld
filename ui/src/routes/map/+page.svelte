@@ -56,8 +56,8 @@
     else next.add(p);
     phases = next;
   };
-  // Temporal links are hidden by default (DESIGN §6).
-  let linkSel = $state<string[]>(['1', '2', '3', '4', '5', '7']);
+  // Only associative links show by default (DESIGN §6); the Links menu adds the rest.
+  let linkSel = $state<string[]>(['2']);
   const edgeTypes = $derived(new Set(linkSel.map(Number)));
   const presentTypes = $derived.by(() => {
     const t = graph.data?.type;

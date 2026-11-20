@@ -27,9 +27,12 @@ test('a result opened from Explore stays in Explore', async ({ page }) => {
   await expect(page.getByRole('option').first()).toContainText('Connection bonus keeps well-linked memories in Full');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/explore/);
-  await expect(page.getByRole('complementary', { name: 'Selected memory' }).getByRole('heading')).toHaveText(
+  // Its row scrolls into view and opens in place (or, if its row isn't
+  // loaded yet, its details show above the table).
+  await expect(page.locator('tbody tr.row.selected button, .pinned h2').first()).toHaveText(
     'Connection bonus keeps well-linked memories in Full',
   );
+  await expect(page.getByRole('region', { name: 'Memory details' })).toBeVisible();
 });
 
 test('/ opens the palette and Esc closes it', async ({ page }) => {

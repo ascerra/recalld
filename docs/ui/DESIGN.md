@@ -119,7 +119,7 @@ Icons: 24px-grid stroke icons at 1.6–1.8 stroke, `currentColor`, round caps (L
 | Suppressed (RIF) | `--color-suppressed` fill + soft cool glow |
 | Selected | 1.6px `--color-text` ring at r + 7 |
 | Hovered | 1.5px `--color-text` ring at r + 5; its edges darken to `text` at 55%; tooltip |
-| Edges | all solid 1px except contradicts, dashed (3 3) in `--color-contradicts`; supersedes slightly stronger. Opacity `0.32 × (0.3 + 0.7 × weight)`; selecting a memory darkens its links and fades everything outside its neighborhood. **Temporal edges are hidden by default** (Links menu). Contradicts edges never carry light. |
+| Edges | all solid 1px except contradicts, dashed (3 3) in `--color-contradicts`; supersedes slightly stronger. Opacity `0.32 × (0.3 + 0.7 × weight)`; selecting a memory darkens its links and fades everything outside its neighborhood. **Only associative edges show by default**; the Links menu adds the other types. Contradicts edges never carry light. |
 
 **Labels:** sans 11.5, 4px `--color-label-halo` stroke. By default only memories returned by the
 current or most recent recall are labeled, plus the hovered and selected ones. Truncate at a word

@@ -106,7 +106,7 @@
   }
 
   let scroller: HTMLDivElement | undefined = $state();
-  const virtualizer = createVirtualizer<HTMLDivElement, HTMLTableRowElement>({
+  const virtualizer = createVirtualizer<HTMLDivElement, HTMLTableSectionElement>({
     count: 0,
     getScrollElement: () => scroller ?? null,
     estimateSize: () => 44,
@@ -119,6 +119,13 @@
     untrack(() => $virtualizer.setOptions({ count, getScrollElement: () => el ?? null }));
   });
   const items = $derived($virtualizer.getVirtualItems());
+  // Rows are measured (an expanded row is taller); the virtualizer keeps
+  // watching each one, so a detail that finishes loading re-measures itself.
+  function measure(node: HTMLTableSectionElement) {
+    $virtualizer.measureElement(node);
+  }
+  /** Clicking a row expands it in place; clicking it again collapses it. */
+  const toggle = (id: string) => selection.select(selection.id === id ? null : id);
   const padTop = $derived(items.length ? items[0].start : 0);
   const padBottom = $derived(items.length ? $virtualizer.getTotalSize() - items[items.length - 1].end : 0);
 
@@ -135,6 +142,12 @@
     }
     return -1;
   });
+  // A memory selected from elsewhere (search) scrolls into view and opens.
+  $effect(() => {
+    const i = selectedIndex;
+    if (i >= 0) untrack(() => $virtualizer.scrollToIndex(i, { align: 'auto' }));
+  });
+
   function onkeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && selection.id) {
       selection.select(null);
@@ -193,6 +206,14 @@
     </DropdownMenu.Root>
   </div>
 
+  {#if selection.id && selectedIndex < 0 && !first.isPending}
+    <!-- Selected from search but not among the loaded rows: show it above the table. -->
+    <div class="pinned">
+      <MemoryPanel id={selection.id} layout="inline" heading onclose={() => selection.select(null)} onopen={(id) => selection.select(id)}
+        secondary={{ label: 'Show on map', onclick: () => goto(`/map?id=${selection.id}`) }} />
+    </div>
+  {/if}
+
   <div class="table-card" bind:this={scroller}>
     <table>
       <thead>
@@ -205,24 +226,28 @@
           <th scope="col" class="w-last last">Accessed</th>
         </tr>
       </thead>
-      <tbody>
-        {#if first.isPending}
+      {#if first.isPending}
+        <tbody>
           {#each Array(12) as _, i (i)}
             <tr class="row"><td colspan="6" class="skel-cell"><span class="skeleton bar"></span></td></tr>
           {/each}
-        {:else if total === 0}
-          <tr><td colspan="6" class="empty">{phases.length === 3 && !tagSel.length && !entitySel.length ? 'No memories in this scope yet. Agents add them with store_memory.' : 'Nothing matches these filters.'}</td></tr>
-        {:else}
-          {#if padTop > 0}<tr style:height="{padTop}px" aria-hidden="true"></tr>{/if}
-          {#each items as item (item.key)}
-            {@const m = rowAt(item.index)}
+        </tbody>
+      {:else if total === 0}
+        <tbody><tr><td colspan="6" class="empty">{phases.length === 3 && !tagSel.length && !entitySel.length ? 'No memories in this scope yet. Agents add them with store_memory.' : 'Nothing matches these filters.'}</td></tr></tbody>
+      {:else}
+        {#if padTop > 0}<tbody aria-hidden="true"><tr style:height="{padTop}px"></tr></tbody>{/if}
+        {#each items as item (item.key)}
+          {@const m = rowAt(item.index)}
+          {@const open = !!m && m.id === selection.id}
+          <!-- One tbody per row so the virtualizer can measure an expanded row. -->
+          <tbody data-index={item.index} use:measure>
             <!-- The whole row is a click target; the summary button is the keyboard path. -->
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-            <tr class="row" class:selected={m && m.id === selection.id} style:height="{item.size}px" onclick={() => m && selection.select(m.id)}>
+            <tr class="row" class:selected={open} onclick={() => m && toggle(m.id)}>
               {#if m}
                 {@const r = strengthAt(m.lastAccessedAt, m.stability)}
                 <td class="first cell-btn">
-                  <button type="button" data-id={m.id} aria-pressed={m.id === selection.id} class:ghost={m.summary === null} onclick={() => selection.select(m.id)}>{m.summary ?? 'Summary dropped'}</button>
+                  <button type="button" data-id={m.id} aria-expanded={open} class:ghost={m.summary === null} onclick={(e) => { e.stopPropagation(); toggle(m.id); }}>{m.summary ?? 'Summary dropped'}</button>
                 </td>
                 <td><span class="phase"><span class="ph ph-{m.phase}"></span>{phaseName(m.phase)}</span></td>
                 <td><span class="strength"><span class="track"><span class="fill" style:width="{Math.round(r * 100)}%"></span></span><span class="mono num">{r.toFixed(2)}</span></span></td>
@@ -233,18 +258,22 @@
                 <td colspan="6" class="skel-cell"><span class="skeleton bar"></span></td>
               {/if}
             </tr>
-          {/each}
-          {#if padBottom > 0}<tr style:height="{padBottom}px" aria-hidden="true"></tr>{/if}
-        {/if}
-      </tbody>
+            {#if open && m}
+              <tr class="expanded">
+                <td colspan="6">
+                  <MemoryPanel id={m.id} layout="inline" onclose={() => selection.select(null)} onopen={(id) => selection.select(id)}
+                    secondary={{ label: 'Show on map', onclick: () => goto(`/map?id=${m.id}`) }} />
+                </td>
+              </tr>
+            {/if}
+          </tbody>
+        {/each}
+        {#if padBottom > 0}<tbody aria-hidden="true"><tr style:height="{padBottom}px"></tr></tbody>{/if}
+      {/if}
     </table>
   </div>
 </Screen>
 
-{#if selection.id}
-  <MemoryPanel id={selection.id} onclose={() => selection.select(null)}
-    secondary={{ label: 'Show on map', onclick: () => goto(`/map?id=${selection.id}`) }} />
-{/if}
 
 <style>
   .toolbar {
@@ -314,8 +343,21 @@
     width: calc(var(--space-8) * 3);
   }
   .row {
+    height: var(--row-h);
     border-bottom: var(--hairline) solid var(--color-divider);
     cursor: pointer;
+  }
+  .pinned {
+    background: var(--color-surface);
+    border: var(--hairline) solid var(--color-border);
+    border-radius: var(--radius-lg);
+  }
+  .expanded {
+    background: var(--color-accent-soft);
+    border-bottom: var(--hairline) solid var(--color-divider);
+  }
+  .expanded td {
+    padding: 0;
   }
   .row.selected {
     background: var(--color-accent-soft);
