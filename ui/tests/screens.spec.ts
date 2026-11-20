@@ -14,6 +14,7 @@ const masks = (page: Page) => [
   page.locator('.tv, .tc'), // system tiles (uptime, RSS)
   page.locator('.meta, .caption'), // relative next-change phrases
   page.locator('section[aria-label="Memories over time"] svg'), // weekly buckets move with the date
+  page.locator('.facts dd, figcaption'), // an opened row's dates, ages and random ID
 ];
 
 async function shot(page: Page, name: string) {
@@ -46,11 +47,12 @@ test('Explore', async ({ page }) => {
   await shot(page, 'explore');
 });
 
-test('Explore with detail panel', async ({ page }) => {
+test('Explore with a row opened', async ({ page }) => {
   await open(page, '/explore?sort=summary');
   await page.getByRole('button', { name: 'Connection bonus keeps well-linked memories in Full' }).click();
   await page.getByRole('img', { name: 'Forgetting curve for the selected memory' }).waitFor();
-  await shot(page, 'explore-panel');
+  await page.getByText(/^Links · \d+/).waitFor();
+  await shot(page, 'explore-row');
 });
 
 test('Search', async ({ page }) => {
