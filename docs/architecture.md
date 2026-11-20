@@ -308,9 +308,11 @@ Effective retrievability `R_eff` (base R + connection bonus) determines phase:
 
 - Day 0: R = 1.0 (just stored)
 - Day 3.7: R = 0.9 (by definition of stability)
-- Day ~36: R = 0.7 (Full -> Summary transition)
-- Day ~280: R = 0.3 (Summary -> Ghost transition)
-- Day ~13,300: R = 0.05 (Ghost -> Removed)
+- Day ~16.5: R = 0.7 (Full -> Summary transition)
+- Day ~160: R = 0.3 (Summary -> Ghost transition)
+- Day ~6,300: R = 0.05 (Ghost -> Removed)
+
+These follow from R = (1 + 19/81 · t/S)^-0.5, so t = S · (R^-2 − 1) · 81/19, before any decay multiplier or reinforcement.
 
 ### Stability bounds
 
