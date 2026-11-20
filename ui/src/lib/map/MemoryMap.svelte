@@ -7,11 +7,11 @@
   import Sigma from 'sigma';
   import { layerDashed, layerPlain, pathLine, sdfCircle } from 'sigma/rendering';
   import { layerBorder } from '@sigma/node-border';
-  import type { Graph as Snapshot } from '$lib/api/snapshot';
+  import { decayMultiplier, projectedPhase as projectPhase, strengthAt as strengthOf, type Graph as Snapshot } from '$lib/api/snapshot';
   import { memoryRows } from '$lib/api/memories';
   import { placeLabels, PointGrid, type LabelCandidate } from '$lib/labels';
   import { ago, phaseName, truncateWords, duration } from '$lib/format';
-  import { DAY_MS, phaseFor, retrievability } from '$lib/fsrs';
+  import { DAY_MS, retrievability } from '$lib/fsrs';
   import { readTheme, type MapTheme } from './theme';
   import { edgeAttributes, nodeAttributes, EDGE } from './encoding';
   import { loadPositions, savePositions } from './cache';
@@ -151,23 +151,8 @@
   }
 
   // ── Encoding updates (phase filter, decay projection, links menu) ─────
-  /** Retrievability of snapshot memory `i` at `at` (the Explore "strength").
-   *  ponytail: ignores per-namespace decay multipliers, like projectedPhase. */
-  function strengthAt(i: number, at = Date.now()): number {
-    const s = snapshot;
-    if (i < 0 || s.permastore[i]) return 1;
-    if (s.stability[i] <= 0) return s.strength[i];
-    return retrievability(Math.max(0, at - s.lastAccess[i]) / DAY_MS, s.stability[i], 1);
-  }
-
-  function projectedPhase(i: number, at: number): number {
-    const s = snapshot;
-    if (s.permastore[i] || s.phase[i] === 4 || s.stability[i] <= 0) return s.phase[i];
-    const ns = s.namespaces.find((n) => n.id === s.ns[i]);
-    const r = strengthAt(i, at);
-    // The projection never makes a memory stronger than recalld says it is now.
-    return Math.max(s.phase[i], phaseFor(r, (ns?.thresholds as [number, number, number]) ?? undefined));
-  }
+  const strengthAt = (i: number, at = Date.now()) => strengthOf(snapshot, i, at);
+  const projectedPhase = (i: number, at: number) => projectPhase(snapshot, i, at);
 
   function reencode() {
     if (!graph) return;
@@ -1000,7 +985,7 @@
   {#if tooltip && tipIndex !== undefined}
     {@const i = tipIndex}
     {@const text = summaries.get(tooltip.id)}
-    {@const r = retrievability(Math.max(0, Date.now() - snapshot.lastAccess[i]) / DAY_MS, snapshot.stability[i])}
+    {@const r = retrievability(Math.max(0, Date.now() - snapshot.lastAccess[i]) / DAY_MS, snapshot.stability[i], decayMultiplier(snapshot, i))}
     <div class="tooltip" role="tooltip" class:flip={tooltip.flip} style:left="{tooltip.x}px" style:top="{tooltip.y}px">
       <div class="t1">{text === null ? 'Summary dropped' : (text ?? '…')}</div>
       <div class="t2 mono">{phaseName(snapshot.phase[i])} · R {r.toFixed(2)} · S {duration(snapshot.stability[i])}</div>
