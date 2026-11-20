@@ -15,7 +15,9 @@ interface Node extends SimulationNodeDatum {
 let sim: ReturnType<typeof forceSimulation<Node>> | null = null;
 let nodes: Node[] = [];
 let adjacency: number[][] = [];
+let links: { source: number | Node; target: number | Node; w: number }[] = [];
 let running = false;
+let dragging = false;
 let pinned: number[] = [];
 // The offset that keeps the layout centered. Recomputed only until the first
 // settle; afterwards fixed, so dragging one node never shifts the rest.
@@ -59,6 +61,8 @@ async function run() {
   }
   running = false;
   if (sim) {
+    // A local reheat is done: let the rest of the map move again.
+    if (!dragging) release();
     const { x, y } = positions();
     freezeOffset();
     post({ type: 'settled', x, y }, [x.buffer, y.buffer]);
@@ -75,6 +79,22 @@ function freezeOffset() {
   offset = [cx / (nodes.length || 1), cy / (nodes.length || 1)];
 }
 
+/** Hold everything outside `near` still, so only that part of the map moves. */
+function pinAllBut(near: Set<number>) {
+  release();
+  for (const other of nodes)
+    if (!near.has(other.i)) {
+      other.fx = other.x;
+      other.fy = other.y;
+      pinned.push(other.i);
+    }
+}
+
+function release() {
+  for (const i of pinned) nodes[i].fx = nodes[i].fy = null;
+  pinned = [];
+}
+
 self.onmessage = (e: MessageEvent<ToWorker>) => {
   const m = e.data;
   if (m.type === 'init') {
@@ -83,9 +103,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     setDegreeScale(m.maxDegree);
     const unknown: number[] = [];
     adjacency = Array.from({ length: m.n }, () => []);
+    // Each memory's strongest link to a memory whose position is known.
+    const best = new Int32Array(m.n).fill(-1), bestW = new Float32Array(m.n).fill(-Infinity);
     for (let k = 0; k < m.src.length; k++) {
-      adjacency[m.src[k]].push(m.dst[k]);
-      adjacency[m.dst[k]].push(m.src[k]);
+      const a = m.src[k], b = m.dst[k], w = m.weight[k];
+      adjacency[a].push(b);
+      adjacency[b].push(a);
+      if (m.known[b] && w > bestW[a]) [best[a], bestW[a]] = [b, w];
+      if (m.known[a] && w > bestW[b]) [best[b], bestW[b]] = [a, w];
     }
     nodes = Array.from({ length: m.n }, (_, i) => {
       if (!m.known[i]) unknown.push(i);
@@ -94,10 +119,13 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     // New memories appear next to their neighbors (DESIGN §6).
     const anyKnown = unknown.length < m.n;
     for (const i of unknown) {
-      const near = adjacency[i].filter((j) => m.known[j]);
-      if (anyKnown && near.length) {
-        nodes[i].x = near.reduce((a, j) => a + nodes[j].x!, 0) / near.length + (Math.random() - 0.5) * 8;
-        nodes[i].y = near.reduce((a, j) => a + nodes[j].y!, 0) / near.length + (Math.random() - 0.5) * 8;
+      // Beside its strongest known link at a random angle, not at the average
+      // of its links: that average is the middle of the map for a memory
+      // linked to everything stored around the same time.
+      if (anyKnown && best[i] >= 0) {
+        const a = Math.random() * Math.PI * 2;
+        nodes[i].x = nodes[best[i]].x! + 30 * Math.cos(a);
+        nodes[i].y = nodes[best[i]].y! + 30 * Math.sin(a);
       } else if (anyKnown) {
         nodes[i].x = (Math.random() - 0.5) * 50;
         nodes[i].y = (Math.random() - 0.5) * 50;
@@ -106,13 +134,14 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         nodes[i].y = undefined;
       }
     }
-    const links = Array.from(m.src, (s, k) => ({ source: s, target: m.dst[k], w: m.weight[k] }));
+    pinned = [];
+    links = Array.from(m.src, (s, k) => ({ source: s, target: m.dst[k], w: m.weight[k] }));
     sim = forceSimulation(nodes)
       // Room to read: strong repulsion, long weak links, generous spacing.
       // Hubs push harder for room and pull harder toward the center, so they
       // anchor their clusters and sparse memories drift outward.
       .force('charge', forceManyBody<Node>().strength((d) => -90 - 160 * d.hub).theta(0.9).distanceMax(500))
-      .force('link', forceLink<Node, { source: number; target: number; w: number }>(links).id((d) => d.i).distance(70)
+      .force('link', forceLink<Node, (typeof links)[number]>(links).id((d) => d.i).distance(70)
         // d3's own normalization: a memory with many links isn't pulled in many times as hard.
         .strength((l) => (0.3 + 0.7 * l.w) / Math.min((l.source as unknown as Node).deg, (l.target as unknown as Node).deg)))
       .force('collide', forceCollide<Node>((d) => d.r * 2.5 + 10).iterations(2))
@@ -135,13 +164,8 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
         near.add(j);
         for (const k of adjacency[j]) near.add(k);
       }
-      pinned = [];
-      for (const other of nodes)
-        if (!near.has(other.i)) {
-          other.fx = other.x;
-          other.fy = other.y;
-          pinned.push(other.i);
-        }
+      pinAllBut(near);
+      dragging = true;
       // A gentle, well-damped reheat of the neighborhood only.
       freezeOffset();
       sim.velocityDecay(0.6).alphaTarget(0.04).alpha(Math.max(sim.alpha(), 0.06));
@@ -153,13 +177,30 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       n.fx = n.fy = null;
       sim.alphaTarget(0);
       sim.velocityDecay(0.4);
-      // Release the pinned nodes once the neighborhood has settled.
-      const release = pinned;
-      pinned = [];
-      setTimeout(() => {
-        for (const i of release) nodes[i].fx = nodes[i].fy = null;
-      }, 1500);
+      dragging = false; // the pinned nodes are released once it settles
     }
+    run();
+  } else if (m.type === 'add' && sim) {
+    // A new memory joins the physics like any other, so it pushes its
+    // neighbors aside (and they it) instead of landing on top of them.
+    freezeOffset();
+    const i = nodes.length, deg = m.links.length;
+    const node: Node = { i, r: nodeSize(deg), hub: hubness(deg), deg: Math.max(1, deg), x: m.x + offset![0], y: m.y + offset![1] };
+    nodes.push(node);
+    adjacency.push([]);
+    for (const l of m.links) {
+      adjacency[i].push(l.to);
+      adjacency[l.to].push(i);
+      links.push({ source: i, target: l.to, w: l.w });
+    }
+    sim.nodes(nodes); // re-initializes every force, links included
+    // Only its surroundings make room; the rest of the map stays put.
+    if (!dragging) {
+      const near = new Set([i]);
+      for (const o of nodes) if (Math.hypot(o.x! - node.x!, o.y! - node.y!) < 160) near.add(o.i);
+      pinAllBut(near);
+    }
+    sim.alpha(Math.max(sim.alpha(), 0.15));
     run();
   } else if (m.type === 'stop') {
     sim?.stop();

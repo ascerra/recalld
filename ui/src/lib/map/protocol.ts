@@ -14,6 +14,8 @@ export type ToWorker =
       maxDegree: number;
     }
   | { type: 'drag'; phase: 'start' | 'move' | 'end'; index: number; x: number; y: number }
+  /** A memory stored while the map is open; it takes the next index. */
+  | { type: 'add'; x: number; y: number; links: { to: number; w: number }[] }
   | { type: 'stop' };
 
 export type FromWorker =

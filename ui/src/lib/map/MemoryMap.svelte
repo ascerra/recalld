@@ -367,13 +367,16 @@
   // ── A new memory's arrival ────────────────────────────────────────────
   // It pops in with a slight overshoot and drifts into place, nearby memories
   // are nudged outward and ease back, and its links grow out of it.
-  interface Motion { x0: number; y0: number; x1: number; y1: number; start: number; dur: number; ripple: boolean; size?: number; shrink?: boolean; done?: () => void }
+  interface Motion { x0: number; y0: number; x1: number; y1: number; start: number; dur: number; ripple: boolean; size?: number; shrink?: boolean; done?: () => void; still?: boolean }
   const motions = new Map<string, Motion>();
   let growing: { from: string; to: string; start: number; dur: number; key: string; visible: boolean; retract?: boolean }[] = [];
   let animRaf = 0;
   let lastTick = 0;
   /** When each live memory appeared, so its first links can grow out of it. */
   const bornAt = new Map<string, number>();
+  /** Layout-worker index of each memory stored while the map is open. */
+  const liveIndex = new Map<string, number>();
+  const simIndex = (id: string, a: Record<string, unknown>) => ((a.index as number) >= 0 ? (a.index as number) : liveIndex.get(id) ?? -1);
   /** Graph units per screen pixel, so motion looks the same at any zoom. */
   const unitsPerPx = () => {
     const a = sigma!.viewportToGraph({ x: 0, y: 0 }), b = sigma!.viewportToGraph({ x: 1, y: 0 });
@@ -396,7 +399,8 @@
       if (t < 0) continue;
       // A ripple goes out and comes back; a move eases to its target.
       const k = m.ripple ? (t >= 1 ? 0 : Math.sin(Math.PI * t)) : easeOut(t);
-      const a: Record<string, number> = { x: m.x0 + (m.x1 - m.x0) * k, y: m.y0 + (m.y1 - m.y0) * k };
+      // `still`: only the size animates; the layout worker owns the position.
+      const a: Record<string, number> = m.still ? {} : { x: m.x0 + (m.x1 - m.x0) * k, y: m.y0 + (m.y1 - m.y0) * k };
       if (m.size !== undefined) a.size = m.shrink ? m.size * (1 - easeIn(t)) : m.size * (t >= 1 ? 1 : Math.max(0, easeBack(t)));
       graph.mergeNodeAttributes(id, a);
       if (t >= 1) {
@@ -415,13 +419,6 @@
   const play = () => {
     if (!animRaf) animRaf = requestAnimationFrame(animate);
   };
-
-  function moveTo(id: string, x: number, y: number, dur = 500) {
-    const a = graph!.getNodeAttributes(id) as { x: number; y: number };
-    if (reducedMotion) graph!.mergeNodeAttributes(id, { x, y });
-    else motions.set(id, { x0: a.x, y0: a.y, x1: x, y1: y, start: performance.now(), dur, ripple: false, size: motions.get(id)?.size });
-    play();
-  }
 
   function birth(e: Extract<Received['event'], { kind: 'store' }>) {
     const g = graph!;
@@ -452,9 +449,7 @@
     const side = Math.random() * Math.PI * 2;
     const cx = anchor.x + 26 * px * Math.cos(side);
     const cy = anchor.y + 26 * px * Math.sin(side);
-    const angle = Math.random() * Math.PI * 2;
-    const from = reducedMotion ? { x: cx, y: cy } : { x: cx + 40 * px * Math.cos(angle), y: cy + 40 * px * Math.sin(angle) };
-    g.addNode(e.id, { ...enc, x: from.x, y: from.y, index: -1, size: reducedMotion ? enc.size : 0 });
+    g.addNode(e.id, { ...enc, x: cx, y: cy, index: -1, size: reducedMotion ? enc.size : 0 });
     e.edges.forEach((x, i) => {
       if (!g.hasNode(x.to)) return;
       // A memory can link to the same neighbor more than once (one per type).
@@ -464,24 +459,16 @@
       g.addEdgeWithKey(key, e.id, x.to, { ...edgeAttributes(theme, x.edgeType, x.weight), type: x.edgeType, visibility: reducedMotion && visible ? 'visible' : 'hidden' });
       if (!reducedMotion && visible) growing.push({ from: e.id, to: x.to, start: now + 180 + i * 70, dur: 380, key, visible });
     });
-    if (reducedMotion) return;
-    motions.set(e.id, { x0: from.x, y0: from.y, x1: cx, y1: cy, start: now, dur: 700, ripple: false, size: enc.size });
-    // Nudge the closest memories outward, unless the layout is still moving them.
-    if (now - lastTick > 500) {
-      const R = 170 * px;
-      const close: { id: string; x: number; y: number; d: number }[] = [];
-      g.forEachNode((id, a) => {
-        if (id === e.id || a.visibility !== 'visible' || motions.has(id)) return;
-        const d = Math.hypot((a.x as number) - cx, (a.y as number) - cy);
-        if (d < R && d > 0) close.push({ id, x: a.x as number, y: a.y as number, d });
-      });
-      close.sort((a, b) => a.d - b.d);
-      for (const c of close.slice(0, 40)) {
-        const push = (3 + 9 * (1 - c.d / R)) * px;
-        const ux = (c.x - cx) / c.d, uy = (c.y - cy) / c.d;
-        motions.set(c.id, { x0: c.x, y0: c.y, x1: c.x + ux * push, y1: c.y + uy * push, start: now + 60, dur: 900, ripple: true });
-      }
+    // The worker settles it among its neighbors: real repulsion nudges the
+    // memories around it aside. Temporal links stay out of the physics here,
+    // or a new memory is pulled toward the middle of everything stored lately.
+    if (worker) {
+      const to = content.map((x) => ({ to: simIndex(x.to, g.getNodeAttributes(x.to)), w: x.weight })).filter((l) => l.to >= 0);
+      liveIndex.set(e.id, snapshot.ids.length + liveIndex.size);
+      worker.postMessage({ type: 'add', x: cx, y: cy, links: to } satisfies ToWorker);
     }
+    if (reducedMotion) return;
+    motions.set(e.id, { x0: cx, y0: cy, x1: cx, y1: cy, start: now, dur: 700, ripple: false, size: enc.size, still: true });
     play();
   }
 
@@ -546,14 +533,6 @@
       for (const id of [e.src, e.dst]) {
         if ((graph.getNodeAttribute(id, 'index') as number) !== -1) continue;
         graph.setNodeAttribute(id, 'size', nodeAttributes(theme, 1, graph.degree(id), false).size);
-        // A young memory leans a little toward each new content link; it never
-        // jumps to the middle of everything it links to.
-        if (e.edgeType === EDGE.temporal || !young || id !== young) continue;
-        const a = graph.getNodeAttributes(id) as { x: number; y: number };
-        const b = graph.getNodeAttributes(id === e.src ? e.dst : e.src) as { x: number; y: number };
-        const target = motions.get(id);
-        const x = target && !target.ripple ? target.x1 : a.x, y = target && !target.ripple ? target.y1 : a.y;
-        moveTo(id, x + (b.x - x) * 0.2, y + (b.y - y) * 0.2);
       }
     } else if (e.kind === 'phase_change' && graph.hasNode(e.id)) {
       const i = graph.getNodeAttribute(e.id, 'index') as number;
@@ -735,9 +714,9 @@
       worker = new LayoutWorker();
       const apply = (x: Float32Array, y: Float32Array) => {
         lastTick = performance.now();
-        graph!.updateEachNodeAttributes((_, a) => {
-          const i = a.index as number;
-          if (i < 0) return a; // added live; the worker doesn't simulate it
+        graph!.updateEachNodeAttributes((id, a) => {
+          const i = simIndex(id, a);
+          if (i < 0 || i >= x.length || motions.get(id)?.ripple) return a;
           a.x = x[i];
           a.y = y[i];
           return a;
@@ -771,16 +750,17 @@
       };
       sigma.on('nodeDragStart', ({ node }) => {
         const a = graph!.getNodeAttributes(node);
-        worker!.postMessage({ type: 'drag', phase: 'start', index: a.index, x: a.x, y: a.y } satisfies ToWorker);
+        worker!.postMessage({ type: 'drag', phase: 'start', index: simIndex(node, a), x: a.x, y: a.y } satisfies ToWorker);
       });
       sigma.on('nodeDrag', ({ node }) => {
         const a = graph!.getNodeAttributes(node);
-        worker!.postMessage({ type: 'drag', phase: 'move', index: a.index, x: a.x, y: a.y } satisfies ToWorker);
+        worker!.postMessage({ type: 'drag', phase: 'move', index: simIndex(node, a), x: a.x, y: a.y } satisfies ToWorker);
       });
       sigma.on('nodeDragEnd', ({ node }) => {
         const a = graph!.getNodeAttributes(node);
-        worker!.postMessage({ type: 'drag', phase: 'end', index: a.index, x: a.x, y: a.y } satisfies ToWorker);
+        worker!.postMessage({ type: 'drag', phase: 'end', index: simIndex(node, a), x: a.x, y: a.y } satisfies ToWorker);
       });
+      liveIndex.clear();
       const src = snapshot.src.slice(), dst = snapshot.dst.slice(), weight = snapshot.weight.slice(), degree = snapshot.degree.slice();
       worker.postMessage(
         { type: 'init', n: snapshot.ids.length, src, dst, weight, degree, x: built.x, y: built.y, known: built.known, maxDegree: Math.max(1, ...degree) } satisfies ToWorker,
