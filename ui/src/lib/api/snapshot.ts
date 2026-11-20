@@ -84,3 +84,42 @@ export async function fetchGraph(namespace: string | null): Promise<Graph> {
   }
   return decode(first, pages);
 }
+
+/**
+ * The part of `g` active since `since` (epoch ms): memories created or
+ * accessed since then, and the edges between them. Fewer nodes for the map's
+ * physics on large stores; `degree` keeps each memory's full link count.
+ */
+export function activeSince(g: Graph, since: number): Graph {
+  const keep: number[] = [];
+  for (let i = 0; i < g.ids.length; i++) if (Math.max(g.createdAt[i], g.lastAccess[i]) >= since) keep.push(i);
+  if (keep.length === g.ids.length) return g;
+  const remap = new Int32Array(g.ids.length).fill(-1);
+  keep.forEach((old, i) => (remap[old] = i));
+  const edges: number[] = [];
+  for (let e = 0; e < g.src.length; e++) if (remap[g.src[e]] >= 0 && remap[g.dst[e]] >= 0) edges.push(e);
+  const pick = <T extends Uint8Array | Uint32Array | Float32Array | Float64Array>(a: T, at: number[]): T => {
+    const out = new (a.constructor as { new (n: number): T })(at.length);
+    at.forEach((j, i) => (out[i] = a[j]));
+    return out;
+  };
+  const ids = keep.map((i) => g.ids[i]);
+  return {
+    ...g,
+    ids,
+    index: new Map(ids.map((id, i) => [id, i])),
+    ns: pick(g.ns, keep),
+    phase: pick(g.phase, keep),
+    strength: pick(g.strength, keep),
+    decayStrength: pick(g.decayStrength, keep),
+    stability: pick(g.stability, keep),
+    createdAt: pick(g.createdAt, keep),
+    lastAccess: pick(g.lastAccess, keep),
+    degree: pick(g.degree, keep),
+    permastore: pick(g.permastore, keep),
+    src: Uint32Array.from(edges, (e) => remap[g.src[e]]),
+    dst: Uint32Array.from(edges, (e) => remap[g.dst[e]]),
+    type: pick(g.type, edges),
+    weight: pick(g.weight, edges),
+  };
+}
