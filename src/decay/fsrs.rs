@@ -107,8 +107,8 @@ const W3_EASY: f32 = 15.6924;
 ///
 /// Corresponds to FSRS v4.5 "Good" rating (w2). A memory with this
 /// stability drops to R = 0.90 after ~3.7 days, crosses the Phase 1
-/// threshold (R = 0.70) at ~36 days, and reaches Ghost (R = 0.30)
-/// at ~280 days.
+/// threshold (R = 0.70) at ~16.5 days, and reaches Ghost (R = 0.30)
+/// at ~160 days.
 ///
 /// Configurable per namespace via DecayConfig.initial_stability.
 pub(super) const DEFAULT_INITIAL_STABILITY: f32 = W2_GOOD;
@@ -670,5 +670,23 @@ impl<'a> FsrsEngine<'a> {
         let effective_sinc = 1.0 + (base_sinc - 1.0) * grade_multiplier;
 
         (stability * effective_sinc).clamp(STABILITY_FLOOR, STABILITY_CEILING)
+    }
+}
+
+#[cfg(test)]
+mod timeline_tests {
+    use super::*;
+
+    /// The default-stability timeline documented in docs/architecture.md and
+    /// on `DEFAULT_INITIAL_STABILITY`.
+    #[test]
+    fn default_stability_timeline_matches_the_docs() {
+        let config = DecayConfig::default();
+        let engine = FsrsEngine::new(&config);
+        let days = |r| engine.days_until_threshold(DEFAULT_INITIAL_STABILITY, r);
+        assert!((days(0.9) - 3.7145).abs() < 0.01);
+        assert!((days(0.7) - 16.5).abs() < 0.1);
+        assert!((days(0.3) - 160.0).abs() < 0.5);
+        assert!((days(0.05) - 6318.0).abs() < 5.0);
     }
 }
