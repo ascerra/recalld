@@ -54,11 +54,19 @@ impl DecaySweepRunner {
             }
             let mut intents = Vec::new();
             for ns in engine.list_namespaces()? {
-                intents.extend(
-                    engine
-                        .meta_store()
-                        .capture_native_decay_pass(ns.id, &inputs, now)?,
-                );
+                match engine
+                    .meta_store()
+                    .capture_native_decay_pass(ns.id, &inputs, now)
+                {
+                    Ok(found) => intents.extend(found),
+                    // One namespace's policy must not stop the pass for the others.
+                    Err(StorageError::InvalidMutation(reason)) => tracing::warn!(
+                        namespace = %ns.name,
+                        %reason,
+                        "decay sweep skipped namespace: its decay policy cannot be resolved"
+                    ),
+                    Err(error) => return Err(error),
+                }
             }
             Ok::<_, StorageError>(intents)
         })

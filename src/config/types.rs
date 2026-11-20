@@ -85,10 +85,10 @@ pub struct DecayConfig {
     /// Hours between decay sweep runs.
     pub sweep_interval_hours: f64,
 
-    /// Phase transition thresholds for retrievability.
+    /// Deprecated, no effect: phase thresholds are set per namespace.
     pub phase_thresholds: PhaseThresholds,
 
-    /// Stability (days) above which a memory is considered permanent.
+    /// Deprecated, no effect: the permastore threshold is set per namespace.
     pub permastore_threshold_days: f64,
 
     /// Skip starting the decay sweep runner entirely (used by benchmarks).
@@ -108,8 +108,18 @@ fn default_decay_rate_multiplier() -> f64 {
     1.0
 }
 
-/// Phase boundary thresholds for FSRS decay.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl DecayConfig {
+    /// Whether the deprecated `[decay.phase_thresholds]` or
+    /// `permastore_threshold_days` differ from the defaults. They have no
+    /// effect: phase thresholds and permastore are set per namespace.
+    pub fn sets_deprecated_thresholds(&self) -> bool {
+        self.phase_thresholds != PhaseThresholds::default()
+            || self.permastore_threshold_days != Self::default().permastore_threshold_days
+    }
+}
+
+/// Phase boundary thresholds for FSRS decay. Deprecated: no effect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PhaseThresholds {
     /// R below this triggers Full -> Summary transition.
@@ -414,7 +424,20 @@ impl Default for LogConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::NamespacesMode;
+    use super::*;
+
+    #[test]
+    fn deprecated_decay_thresholds_warn_only_when_changed() {
+        let mut decay = DecayConfig::default();
+        assert!(!decay.sets_deprecated_thresholds());
+        decay.decay_rate_multiplier = 2.0;
+        assert!(!decay.sets_deprecated_thresholds());
+        decay.phase_thresholds.summary_to_ghost = 0.5;
+        assert!(decay.sets_deprecated_thresholds());
+        decay.phase_thresholds = PhaseThresholds::default();
+        decay.permastore_threshold_days = 99.0;
+        assert!(decay.sets_deprecated_thresholds());
+    }
 
     #[test]
     fn namespaces_mode_defaults_to_multi_and_parses_toml_and_env_text() {

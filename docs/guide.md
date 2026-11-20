@@ -278,27 +278,17 @@ FSRS decay engine tuning. Controls how memories fade over time.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `sweep_interval_hours` | f64 | `24.0` | Hours between automatic decay sweep runs. |
-| `permastore_threshold_days` | f64 | `1500.0` | Stability (days) above which a memory is permanent and exempt from decay. |
-| `decay_rate_multiplier` | f64 | `1.0` | Global decay rate multiplier. `1.0` = normal FSRS decay. `>1.0` = slower decay. `<1.0` = faster decay. `0.0` = decay disabled entirely. |
+| `decay_rate_multiplier` | f64 | `1.0` | Global decay rate multiplier for namespaces without their own. `1.0` = normal FSRS decay. `>1.0` = slower decay. `<1.0` = faster decay. `0.0` = decay disabled entirely. A change is adopted at the next restart (see [Tuning decay](#tuning-decay)). |
 | `disable_sweep` | bool | `false` | Skip starting the decay sweep runner (used by benchmarks). |
+| `permastore_threshold_days` | f64 | `1500.0` | **Deprecated, no effect.** The permastore threshold is set per namespace. |
 
-Env vars: `RECALLD_DECAY_SWEEP_INTERVAL_HOURS`, `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS`, `RECALLD_DECAY_RATE_MULTIPLIER`
+Env vars: `RECALLD_DECAY_SWEEP_INTERVAL_HOURS`, `RECALLD_DECAY_RATE_MULTIPLIER`
 
 > **Note:** `disable_sweep` is a benchmark-only option with no environment variable override. It can only be set via the TOML config file.
 
-### `[decay.phase_thresholds]`
+### `[decay.phase_thresholds]` (deprecated)
 
-Retrievability thresholds that trigger phase transitions.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `full_to_summary` | f64 | `0.7` | R below this triggers Full -> Summary (full_text dropped). |
-| `summary_to_ghost` | f64 | `0.3` | R below this triggers Summary -> Ghost (summary dropped). |
-| `ghost_to_delete` | f64 | `0.05` | R below this triggers Ghost -> deletion. |
-
-Constraints: `full_to_summary > summary_to_ghost > ghost_to_delete`, all values in `(0.0, 1.0)`.
-
-Env vars: `RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`
+**Deprecated, no effect.** Phase thresholds are set per namespace. The section and its env vars (`RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`, and `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS` for `permastore_threshold_days`) are still accepted, but the daemon logs a warning at startup when any of them differs from its default.
 
 ### `[cache]`
 
@@ -1184,7 +1174,7 @@ Each time a memory is reinforced, its stability increases. The FSRS algorithm ca
 
 ### Permastore
 
-Memories with stability above 1,500 days are exempt from decay. They effectively never fade.
+Memories whose stability is above their namespace's permastore threshold (1,500 days by default) are exempt from decay. They effectively never fade. The threshold is set per namespace.
 
 ### Tuning decay
 
@@ -1202,6 +1192,10 @@ decay_rate_multiplier = 0.5
 decay_rate_multiplier = 0.0
 ```
 
+The multiplier applies to every namespace that has no multiplier of its own. Each such namespace records the value it uses. When you change the setting and restart the daemon, startup adopts the new value for those namespaces and logs a `WARN` per namespace with the old and new value and how many memories the change moves at the next sweep (Full to Summary, Summary to Ghost, and deletions). Those memories change phase at the next decay sweep, so lowering the multiplier can drop full text, summaries, or whole memories.
+
+If startup cannot adopt the new value for a namespace (for example, a namespace with more than 100,000 memories exceeds the adoption preview limits), the daemon still starts and that namespace keeps its previous value. A `WARN` names the namespace and says the change is not yet applied.
+
 **Per-namespace multiplier** (set when creating a namespace via the `decayRateMultiplier` parameter).
 
 **Sweep interval** (`decay.sweep_interval_hours`):
@@ -1212,16 +1206,7 @@ decay_rate_multiplier = 0.0
 sweep_interval_hours = 6.0
 ```
 
-**Phase thresholds**:
-
-```toml
-[decay.phase_thresholds]
-# More aggressive: drop full text sooner
-full_to_summary = 0.8
-
-# Keep summaries longer
-summary_to_ghost = 0.2
-```
+**Phase thresholds and permastore** are set per namespace. The global `[decay.phase_thresholds]` and `permastore_threshold_days` settings are deprecated and have no effect.
 
 ### Manual sweep
 

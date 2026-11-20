@@ -227,7 +227,7 @@ recalld-cli recall "deployment infrastructure"
 recalld-cli status
 ```
 
-Available CLI commands: `store`, `recall`, `get`, `forget`, `reinforce`, `inspect`, `namespaces`, `sweep`, `status`, `export`, `import`, `list`, `health`.
+Available CLI commands: `store`, `recall`, `get`, `forget`, `reinforce`, `inspect`, `namespaces`, `sweep`, `status`, `export`, `import`, `list`, `health`. Offline commands, run with the daemon stopped: `policy` (preview and adopt a namespace's inherited decay multiplier) and `reembed-vectors`.
 
 **Local web UI** -- `recalld ui` opens a browser UI over your memories: a Memory map that lights up as agents recall, an Explore table, a Timeline and a Health view, with Search on `⌘K`. It comes with the standard install, is read-only by default (browsing never reinforces or decays anything) and only listens on `127.0.0.1`. Turn it off with `[ui] enabled = false` in the config (or `RECALLD_UI_ENABLED=false`); the Docker image is built without it. See [docs/ui.md](docs/ui.md).
 

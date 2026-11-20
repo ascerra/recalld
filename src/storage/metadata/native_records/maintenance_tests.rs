@@ -309,9 +309,10 @@ fn native_maintenance_uses_anchor_and_rejects_stale_feedback_and_global_policy_w
     assert_eq!(record(&s, id).encode().unwrap(), before);
     let intent = s.capture_decay(id, d.ns).unwrap();
     s.policy.multiplier = 2.;
+    // An unadopted configured multiplier is ignored: the adopted value governs.
     assert!(matches!(
         s.apply_decay(&ctx(&s, &d, "policy"), &intent),
-        Err(StorageError::InvalidMutation(message)) if message.contains("differs from canonical adoption")
+        Ok(NativeDecayResult::Skipped(NativeDecaySkip::Unchanged))
     ));
     assert_eq!(s.metadata().control_state().unwrap(), state);
     assert_eq!(record(&s, id).encode().unwrap(), before);
