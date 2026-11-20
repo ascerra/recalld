@@ -55,8 +55,11 @@ test.beforeAll(async () => {
   }
   const bin = process.env.RECALLD_BIN!;
   if (smoke) {
-    process.env.PERF_MEMORIES ??= '1000';
-    process.env.PERF_EDGES ??= '10000';
+    // CI generates the store with a debug binary; 1k / 10k took over 10 min
+    // there (past the hook timeout). 200 / 2k takes ~40 s and still
+    // exercises every measurement; budgets come from the full 10k / 100k run.
+    process.env.PERF_MEMORIES ??= '200';
+    process.env.PERF_EDGES ??= '2000';
   }
   const t = performance.now();
   stack = await startStack(bin, 'perf');
