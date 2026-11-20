@@ -1750,6 +1750,10 @@ impl state::FsrsEngine for FsrsEngineAdapter {
         })
     }
 
+    fn decay_rate_multiplier(&self) -> f64 {
+        self.config.decay.decay_rate_multiplier
+    }
+
     fn sweep_thread_alive(&self) -> bool {
         self.sweep_alive
     }

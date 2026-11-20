@@ -221,6 +221,33 @@ async fn prepared_get_rpc_inner_structure_rejects_before_evidence_acquisition() 
     }
 }
 
+/// A Ghost/Tombstone summary is never projected by the daemon, so it is still
+/// rejected; the failure names the check without echoing content (#231).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn forged_ghost_summary_is_rejected_and_names_the_check() {
+    let (f, id) = fixture().await;
+    let mut forged = search(&f)
+        .get_contract(input(id, false), MAX_MESSAGE_SIZE)
+        .await;
+    forged.envelope.data.as_mut().unwrap().memory.phase = DecayPhase::Ghost;
+    let result = peer(
+        json!({"wireVersion":1,"httpStatus":200,
+            "replyJson":serde_json::to_string(&forged).unwrap()}),
+        false,
+        capabilities(true),
+        false,
+        id,
+    )
+    .await;
+    assert_eq!(result.http_status, 503);
+    let message = result.envelope.error.unwrap().message;
+    assert!(
+        message.contains("failed validation at src/daemon/prepared_get.rs:"),
+        "{message}"
+    );
+    assert!(!message.contains("point consumer"), "{message}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_get_rpc_independent_inner_and_outer_limits_retain_supported_foreign_evidence() {
     let (f, id) = fixture().await;
