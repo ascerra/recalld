@@ -331,7 +331,11 @@ memoryCount: number,
 /**
  * Creation timestamp as ISO 8601 string.
  */
-createdAt: string, };
+createdAt: string, 
+/**
+ * The namespace's decay policy. Absent from older daemons.
+ */
+policy?: NamespacePolicyView, };
 
 export type NamespaceStats = { 
 /**
@@ -379,7 +383,66 @@ edgeCount: number,
  * (`memory_count` x `embeddingDim` x 4). NOT the size of
  * `vectors.dat`, which retains freed slots until compaction.
  */
-vectorBytes: number, };
+vectorBytes: number, 
+/**
+ * The namespace's decay policy. Absent from older daemons.
+ */
+policy?: NamespacePolicyView, };
+
+export type NamespacePolicyView = { 
+/**
+ * Stability, in days, a new memory starts with.
+ */
+initialStability: number, 
+/**
+ * FSRS difficulty a new memory starts with.
+ */
+defaultDifficulty: number, 
+/**
+ * Target retention for FSRS interval scheduling.
+ */
+desiredRetention: number, 
+/**
+ * Retrievability thresholds for Full -> Summary -> Ghost -> deletion.
+ */
+phaseThresholds: PhaseThresholds, 
+/**
+ * Stability, in days, at which a memory becomes permastore.
+ */
+permastoreThreshold: number, 
+/**
+ * The namespace's own multiplier; null when it inherits the
+ * `[decay]` setting.
+ */
+decayRateMultiplier: number | null, 
+/**
+ * The multiplier the sweep uses: the namespace's own, else the
+ * inherited one. 0 disables decay.
+ */
+effectiveDecayRateMultiplier: number, 
+/**
+ * Days until a memory that is never recalled or reinforced drops to
+ * Summary, starting at `initialStability`. Null when decay is disabled.
+ */
+daysUntilSummary: number | null, 
+/**
+ * Days until that memory drops to Ghost. Null when decay is disabled.
+ */
+daysUntilGhost: number | null, };
+
+export type PhaseThresholds = { 
+/**
+ * R below this triggers Full -> Summary transition.
+ */
+fullToSummary: number, 
+/**
+ * R below this triggers Summary -> Ghost transition.
+ */
+summaryToGhost: number, 
+/**
+ * R below this triggers Ghost -> deletion.
+ */
+ghostToDelete: number, };
 
 export type PhaseCounts = { 
 /**

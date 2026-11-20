@@ -438,6 +438,7 @@ pub(crate) fn info(
         embedding_dim: ns.embedding_dim as u16,
         memory_count: 0,
         created_at: crate::time::format_timestamp(ns.created_at, timezone),
+        policy: None,
     }
 }
 

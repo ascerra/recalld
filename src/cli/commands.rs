@@ -218,6 +218,80 @@ pub enum NamespaceAction {
 
     /// Show statistics for a namespace (memory count, phase distribution, disk usage)
     Stats(NamespaceStatsArgs),
+
+    /// Change how fast memories decay in an existing namespace. Flags not
+    /// given keep their current values; prints the policy before and after.
+    Policy(NamespacePolicyArgs),
+}
+
+/// Arguments for `namespaces policy`.
+#[derive(Debug, Args)]
+pub struct NamespacePolicyArgs {
+    /// Namespace name (`default` included).
+    pub name: String,
+
+    /// Time scale for decay: 1 normal, 2 twice as slow, 0 no decay.
+    #[arg(long, conflicts_with = "inherit_decay_rate")]
+    pub decay_rate_multiplier: Option<f32>,
+
+    /// Drop the namespace's own multiplier and use the `[decay]` setting.
+    #[arg(long)]
+    pub inherit_decay_rate: bool,
+
+    /// Stability, in days, a new memory starts with.
+    #[arg(long)]
+    pub initial_stability: Option<f32>,
+
+    /// Retrievability below which a memory drops from Full to Summary.
+    #[arg(long)]
+    pub full_to_summary: Option<f32>,
+
+    /// Retrievability below which a memory drops from Summary to Ghost.
+    #[arg(long)]
+    pub summary_to_ghost: Option<f32>,
+
+    /// Retrievability below which a Ghost memory is deleted.
+    #[arg(long)]
+    pub ghost_to_delete: Option<f32>,
+
+    /// Stability, in days, at which a memory becomes permanent.
+    #[arg(long)]
+    pub permastore_days: Option<f32>,
+}
+
+impl NamespacePolicyArgs {
+    /// The partial policy change these flags ask for, in the
+    /// `update_namespace_policy` field names.
+    pub fn patch(&self) -> serde_json::Map<String, serde_json::Value> {
+        use serde_json::{Map, Value, json};
+        let mut patch = Map::new();
+        if let Some(m) = self.decay_rate_multiplier {
+            patch.insert("decayRateMultiplier".into(), json!(m));
+        }
+        if self.inherit_decay_rate {
+            patch.insert("decayRateMultiplier".into(), Value::Null);
+        }
+        if let Some(s) = self.initial_stability {
+            patch.insert("initialStability".into(), json!(s));
+        }
+        if let Some(p) = self.permastore_days {
+            patch.insert("permastoreThreshold".into(), json!(p));
+        }
+        let mut thresholds = Map::new();
+        for (name, value) in [
+            ("fullToSummary", self.full_to_summary),
+            ("summaryToGhost", self.summary_to_ghost),
+            ("ghostToDelete", self.ghost_to_delete),
+        ] {
+            if let Some(v) = value {
+                thresholds.insert(name.into(), json!(v));
+            }
+        }
+        if !thresholds.is_empty() {
+            patch.insert("phaseThresholds".into(), Value::Object(thresholds));
+        }
+        patch
+    }
 }
 
 /// Arguments for `namespaces create`.
@@ -446,4 +520,59 @@ fn parse_policy_generation(
         .to_owned()
         .try_into()
         .map_err(|e: crate::storage::StorageError| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn policy_args(flags: &[&str]) -> NamespacePolicyArgs {
+        let argv = ["recalld-cli", "namespaces", "policy", "default"];
+        let cli = Cli::try_parse_from(argv.iter().chain(flags)).unwrap();
+        let Command::Namespaces(NamespacesArgs {
+            action: NamespaceAction::Policy(args),
+        }) = cli.command
+        else {
+            panic!("not namespaces policy")
+        };
+        args
+    }
+
+    #[test]
+    fn namespaces_policy_flags_change_only_what_they_name() {
+        let args = policy_args(&[
+            "--decay-rate-multiplier",
+            "2",
+            "--full-to-summary",
+            "0.6",
+            "--permastore-days",
+            "900",
+        ]);
+        let current = crate::serialization::policy::PolicyValues::current(
+            &crate::model::NamespaceConfig::default_namespace(0),
+        );
+        let merged = current.merge(&args.patch()).unwrap();
+        let num = |v: &serde_json::Value| v.as_f64().unwrap() as f32;
+        assert_eq!(num(&merged["decayRateMultiplier"]), 2.0);
+        assert_eq!(num(&merged["phaseThresholds"]["fullToSummary"]), 0.6);
+        assert_eq!(num(&merged["phaseThresholds"]["summaryToGhost"]), 0.3);
+        assert_eq!(num(&merged["permastoreThreshold"]), 900.0);
+        assert_eq!(num(&merged["initialStability"]), 3.7145);
+
+        let inherit = policy_args(&["--inherit-decay-rate"]).patch();
+        assert!(inherit["decayRateMultiplier"].is_null());
+        assert!(policy_args(&[]).patch().is_empty());
+        assert!(current.merge(&policy_args(&[]).patch()).is_err());
+        let argv = [
+            "recalld-cli",
+            "namespaces",
+            "policy",
+            "default",
+            "--inherit-decay-rate",
+            "--decay-rate-multiplier",
+            "2",
+        ];
+        assert!(Cli::try_parse_from(argv).is_err());
+    }
 }

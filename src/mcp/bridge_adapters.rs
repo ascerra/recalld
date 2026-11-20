@@ -2874,6 +2874,8 @@ fn build_list_tags_response(
 /// handles happen to be.
 pub struct McpNamespaceAdapter {
     native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
+    /// The inherited multiplier and planner inputs the sweep resolves with.
+    policy_inputs: crate::storage::native_lifecycle::NativePolicyInputs,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     embedding: Arc<dyn EmbeddingProvider>,
     cache: Arc<CacheManager>,
@@ -2899,6 +2901,7 @@ impl McpNamespaceAdapter {
         policy: crate::storage::native_lifecycle::NativePolicyInputs,
         clock: Arc<dyn crate::time::Clock>,
     ) -> Self {
+        self.policy_inputs = policy.clone();
         self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
             crate::derived_completion::DerivedCompletion {
                 storage: self.storage.clone(),
@@ -2930,6 +2933,7 @@ impl McpNamespaceAdapter {
         cache.bind_storage(&storage);
         Self {
             native_catalog: None,
+            policy_inputs: Default::default(),
             storage,
             embedding,
             cache,
@@ -3046,6 +3050,33 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             .await
     }
 
+    async fn update_namespace_policy(
+        &self,
+        namespace: &str,
+        patch: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(u16, serde_json::Value), bridge::BridgeError> {
+        let ns = self
+            .storage
+            .read()
+            .map_err(|_| bridge::BridgeError::Storage("storage lock poisoned".into()))?
+            .get_namespace_by_name(namespace)
+            .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?
+            .ok_or_else(|| {
+                bridge::BridgeError::NotFound(format!("namespace '{namespace}' not found"))
+            })?;
+        // ponytail: read-then-replace, so a concurrent policy change to a field
+        // this patch does not name is overwritten; last writer wins.
+        let result = match crate::serialization::policy::PolicyRequest::from_patch(&ns, &patch) {
+            Ok(request) => bridge::NamespaceRegistry::update_native_policy(self, request).await,
+            Err(error) => Err(error.into()),
+        };
+        let (status, envelope) =
+            crate::native_catalog_adapter::policy_response(result, Some(ns.id));
+        let envelope = serde_json::to_value(envelope)
+            .map_err(|e| bridge::BridgeError::Internal(e.to_string()))?;
+        Ok((status, envelope))
+    }
+
     async fn create_native_namespace(
         &self,
         request: crate::serialization::catalog::CreateNamespaceRequest,
@@ -3063,6 +3094,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         let result = async {
             let storage = self.storage.clone();
             let tz = self.timezone;
+            let inputs = self.policy_inputs.clone();
             tokio::task::spawn_blocking(move || {
                 let storage_r = storage.read().map_err(|e| {
                     bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
@@ -3087,6 +3119,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
                         embedding_dim: ns.embedding_dim as u16,
                         memory_count,
                         created_at: format_timestamp(ns.created_at, tz),
+                        policy: bridge::NamespacePolicyView::resolve(&ns, &inputs),
                     });
                 }
                 Ok(out)
@@ -3170,6 +3203,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             embedding_dim: config.embedding_dim as u16,
             memory_count: 0,
             created_at: format_timestamp(config.created_at, self.timezone),
+            policy: None,
         })
     }
 
@@ -3210,6 +3244,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
         let result = async {
             let storage = self.storage.clone();
             let ns_name = name.to_string();
+            let inputs = self.policy_inputs.clone();
             tokio::task::spawn_blocking(move || {
                 let storage_r = storage.read().map_err(|e| {
                     bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
@@ -3292,6 +3327,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
                     avg_strength,
                     edge_count,
                     vector_bytes,
+                    policy: bridge::NamespacePolicyView::resolve(&ns, &inputs),
                 })
             })
             .await

@@ -1778,6 +1778,7 @@ impl state::FsrsEngine for FsrsEngineAdapter {
 /// Adapts `RedbStorageEngine` to the API `NamespaceRegistry` trait.
 pub struct NamespaceRegistryAdapter {
     native_catalog: Option<crate::native_catalog_adapter::NativeCatalogAdapter>,
+    policy_inputs: Option<crate::storage::native_lifecycle::NativePolicyInputs>,
     completion: Option<crate::derived_completion::DerivedCompletion>,
     storage: Arc<std::sync::RwLock<RedbStorageEngine>>,
     clock: Arc<dyn crate::time::Clock>,
@@ -1803,6 +1804,7 @@ impl NamespaceRegistryAdapter {
         fts: Arc<tokio::sync::Mutex<FtsIndex>>,
         entities: Arc<tokio::sync::RwLock<EntityIndex>>,
     ) -> Self {
+        self.policy_inputs = Some(policy.clone());
         self.native_catalog = Some(crate::native_catalog_adapter::NativeCatalogAdapter::new(
             crate::derived_completion::DerivedCompletion {
                 storage: self.storage.clone(),
@@ -1827,6 +1829,7 @@ impl NamespaceRegistryAdapter {
         Self {
             completion: None,
             native_catalog: None,
+            policy_inputs: None,
             storage,
             embedding,
             clock: Arc::new(crate::time::SystemClock),
@@ -1888,6 +1891,10 @@ impl state::NamespaceRegistry for NamespaceRegistryAdapter {
             .ok_or(crate::native_catalog_adapter::CatalogError::Unavailable)?
             .create(request)
             .await
+    }
+
+    fn policy_inputs(&self) -> Option<crate::storage::native_lifecycle::NativePolicyInputs> {
+        self.policy_inputs.clone()
     }
 
     fn resolve(&self, name: &str) -> Option<NamespaceConfig> {

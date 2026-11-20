@@ -60,12 +60,25 @@ pub(crate) fn request_contract_version(
         .and_then(|value| ContractVersion::from_http(value).map_err(|e| e.to_string()))
 }
 
+/// The one operation published at contract 2 (#237): numeric namespace policy
+/// replacement, `PUT /namespaces/{id}/policy`. Contract 2 stays refused elsewhere.
+pub(crate) fn is_policy_replacement(method: &axum::http::Method, path: &str) -> bool {
+    method == axum::http::Method::PUT
+        && path
+            .strip_prefix("/namespaces/")
+            .and_then(|rest| rest.strip_suffix("/policy"))
+            .is_some_and(|id| !id.is_empty() && !id.contains('/'))
+}
+
 /// Admit application contract selection before any REST handler/backend work.
 pub async fn contract_version_middleware(req: Request<Body>, next: Next) -> Response {
+    use crate::serialization::contract::ContractVersion;
     use axum::response::IntoResponse;
-    match request_contract_version(req.headers())
-        .and_then(|version| version.require_supported().map_err(|e| e.to_string()))
-    {
+    let policy = is_policy_replacement(req.method(), req.uri().path());
+    match request_contract_version(req.headers()).and_then(|version| match version {
+        ContractVersion::V2 if policy => Ok(()),
+        _ => version.require_supported().map_err(|e| e.to_string()),
+    }) {
         Ok(()) => next.run(req).await,
         Err(message) => super::AppError::BadRequest {
             message,
