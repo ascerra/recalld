@@ -11,7 +11,8 @@ pub use loader::{
 };
 pub use types::{
     CacheConfig, DecayConfig, EmbeddingConfig, EmbeddingProvider, GraphConfig, LogConfig,
-    LogFormat, PhaseThresholds, RifConfig, ServerConfig, StorageConfig, UiConfig,
+    LogFormat, NamespacesConfig, NamespacesMode, PhaseThresholds, RifConfig, ServerConfig,
+    StorageConfig, UiConfig,
 };
 
 use std::path::PathBuf;
@@ -81,6 +82,8 @@ pub struct RecalldConfig {
     pub log: LogConfig,
     /// Local web UI.
     pub ui: UiConfig,
+    /// Namespace mode for MCP clients.
+    pub namespaces: NamespacesConfig,
 
     /// Display timezone for formatted timestamps.
     ///
@@ -107,6 +110,7 @@ impl Default for RecalldConfig {
             rif: RifConfig::default(),
             log: LogConfig::default(),
             ui: UiConfig::default(),
+            namespaces: NamespacesConfig::default(),
             timezone: default_timezone(),
         }
     }

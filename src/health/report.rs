@@ -14,20 +14,61 @@ use crate::api::models::{
 use crate::api::{NamespaceRegistry, StorageEngine};
 use crate::decay::config::DecayConfig;
 use crate::decay::fsrs::FsrsEngine as FsrsCalculator;
+use crate::decay::lifecycle::resolve_policy;
 use crate::model::decay::DecayPhase;
 use crate::model::id::{MemoryId, NamespaceId};
 use crate::model::namespace::NamespaceConfig;
+use crate::model::record::DiskRecord;
 
-/// Build a [`DecayConfig`] from a [`NamespaceConfig`]'s phase thresholds.
-pub fn decay_config_for_namespace(ns: &NamespaceConfig) -> DecayConfig {
-    DecayConfig {
-        initial_stability: ns.initial_stability,
-        phase_1_threshold: ns.phase_thresholds.full_to_summary,
-        phase_2_threshold: ns.phase_thresholds.summary_to_ghost,
-        phase_3_threshold: ns.phase_thresholds.ghost_to_delete,
-        permastore_threshold: ns.permastore_threshold,
-        ..DecayConfig::default()
+/// How the decay sweep sees a record now, for forecasts.
+pub struct DecayOutlook {
+    /// R now.
+    pub strength: f32,
+    /// The effective decay multiplier the sweep applies to its namespace.
+    pub multiplier: f32,
+    /// Days until R crosses its phase's threshold (`0` = the next sweep);
+    /// `None` when the sweep will not move it: permastore, Tombstone or
+    /// decay disabled.
+    pub days: Option<f32>,
+}
+
+/// [`DecayOutlook`] for `record` at `now_millis`, under the policy the sweep
+/// resolves for `ns` (its multiplier, else `global_multiplier`). `None` when
+/// the sweep would skip the record as invalid.
+pub fn decay_outlook(
+    record: &DiskRecord,
+    ns: &NamespaceConfig,
+    global_multiplier: f64,
+    now_millis: i64,
+) -> Option<DecayOutlook> {
+    let policy = resolve_policy(ns, &DecayConfig::default(), global_multiplier).ok()?;
+    if !record.stability.is_finite() || record.stability <= 0.0 {
+        return None;
     }
+    let (c, multiplier) = (&policy.config, policy.decay_rate_multiplier);
+    let engine = FsrsCalculator::new(c);
+    let elapsed_days = crate::time::elapsed_days(now_millis, record.last_accessed_at);
+    let strength = engine.retrievability(elapsed_days, record.stability, multiplier);
+    let threshold = match record.phase {
+        DecayPhase::Full => Some(c.phase_1_threshold),
+        DecayPhase::Summary => Some(c.phase_2_threshold),
+        DecayPhase::Ghost => Some(c.phase_3_threshold),
+        DecayPhase::Tombstone => None,
+    }
+    .filter(|_| record.is_permastore == 0 && multiplier != 0.0);
+    let days = threshold.map(|t| {
+        if strength <= t {
+            return 0.0;
+        }
+        // R(t / m): the curve stretches by the multiplier, so the crossing does too.
+        let crossing = engine.days_until_threshold(record.stability, t) * multiplier;
+        (crossing - elapsed_days).max(0.0)
+    });
+    Some(DecayOutlook {
+        strength,
+        multiplier,
+        days,
+    })
 }
 
 /// Compute overview section from pre-filtered records.
@@ -67,8 +108,9 @@ pub fn compute_overview(
 /// Uses the provided namespace registry to look up per-namespace FSRS
 /// configuration rather than instantiating calculators directly.
 pub fn compute_decay_forecast(
-    records: &[&(MemoryId, crate::model::record::DiskRecord)],
+    records: &[&(MemoryId, DiskRecord)],
     namespaces: &dyn NamespaceRegistry,
+    global_multiplier: f64,
 ) -> DecayForecast {
     let now_millis = chrono::Utc::now().timestamp_millis();
     let mut t7 = TransitionCounts::default();
@@ -76,48 +118,14 @@ pub fn compute_decay_forecast(
     let mut t90 = TransitionCounts::default();
 
     for (_, record) in records {
-        // Skip permastore -- they never decay
-        if record.is_permastore != 0 {
+        let Some(ns_config) = namespaces.get_by_id(record.namespace_id) else {
             continue;
-        }
-
-        // Get namespace config for thresholds
-        let ns_config = match namespaces.get_by_id(record.namespace_id) {
-            Some(c) => c,
-            None => continue,
         };
-        let dc = decay_config_for_namespace(&ns_config);
-        let engine = FsrsCalculator::new(&dc);
-
-        // Compute elapsed time
-        let elapsed_millis = (now_millis - record.last_accessed_at).max(0) as f64;
-        let elapsed_days = (elapsed_millis / 86_400_000.0) as f32;
-
-        // Current retrievability for forecasting
-        let current_r = engine.retrievability(elapsed_days, record.stability, 1.0);
-
-        // Determine current phase and next threshold
-        let current_phase = record.phase;
-
-        let (phase_label, threshold) = match current_phase {
-            DecayPhase::Full => (DecayPhase::Full, dc.phase_1_threshold),
-            DecayPhase::Summary => (DecayPhase::Summary, dc.phase_2_threshold),
-            DecayPhase::Ghost => (DecayPhase::Ghost, dc.phase_3_threshold),
-            // Tombstoned memories are terminal — no further transitions.
-            DecayPhase::Tombstone => continue,
-        };
-
-        if current_r <= threshold {
-            // Already below threshold -- will transition on next sweep
-            count_transition(phase_label, 0.0, &mut t7, &mut t30, &mut t90);
-        } else {
-            let days_until = engine.days_until_threshold(record.stability, threshold);
-            let remaining = days_until - elapsed_days;
-            if remaining > 0.0 {
-                count_transition(phase_label, remaining, &mut t7, &mut t30, &mut t90);
-            } else {
-                count_transition(phase_label, 0.0, &mut t7, &mut t30, &mut t90);
-            }
+        if let Some(DecayOutlook {
+            days: Some(days), ..
+        }) = decay_outlook(record, &ns_config, global_multiplier, now_millis)
+        {
+            count_transition(record.phase, days, &mut t7, &mut t30, &mut t90);
         }
     }
 
@@ -160,34 +168,29 @@ fn count_transition(
 /// Uses the provided namespace registry to look up per-namespace FSRS
 /// configuration rather than instantiating calculators directly.
 pub fn compute_at_risk(
-    records: &[&(MemoryId, crate::model::record::DiskRecord)],
+    records: &[&(MemoryId, DiskRecord)],
     namespaces: &dyn NamespaceRegistry,
+    global_multiplier: f64,
 ) -> Vec<AtRiskMemory> {
     let now_millis = chrono::Utc::now().timestamp_millis();
     let mut candidates: Vec<AtRiskMemory> = Vec::new();
 
     for (id, record) in records {
-        // Only Ghost phase, non-permastore
-        if record.phase != DecayPhase::Ghost || record.is_permastore != 0 {
+        // Only Ghost phase; permastore and decay-disabled ones are never deleted.
+        if record.phase != DecayPhase::Ghost {
             continue;
         }
 
-        let ns_config = match namespaces.get_by_id(record.namespace_id) {
-            Some(c) => c,
-            None => continue,
+        let Some(ns_config) = namespaces.get_by_id(record.namespace_id) else {
+            continue;
         };
-        let dc = decay_config_for_namespace(&ns_config);
-        let engine = FsrsCalculator::new(&dc);
-
-        let elapsed_millis = (now_millis - record.last_accessed_at).max(0) as f64;
-        let elapsed_days = (elapsed_millis / 86_400_000.0) as f32;
-        let current_r = engine.retrievability(elapsed_days, record.stability, 1.0);
-
-        let days_until_deletion = if current_r <= dc.phase_3_threshold {
-            0.0
-        } else {
-            let days_until = engine.days_until_threshold(record.stability, dc.phase_3_threshold);
-            (days_until - elapsed_days).max(0.0)
+        let Some(DecayOutlook {
+            strength: current_r,
+            days: Some(days_until_deletion),
+            ..
+        }) = decay_outlook(record, &ns_config, global_multiplier, now_millis)
+        else {
+            continue;
         };
 
         let id_str = id.to_string();

@@ -739,6 +739,7 @@ async fn run_serve(
         ..Default::default()
     };
 
+    let namespaces_mode = config.namespaces.mode;
     let system = match Recalld::new(config).await {
         Ok(s) => s,
         Err(e) => {
@@ -830,7 +831,7 @@ async fn run_serve(
     };
 
     // Build MCP bridge and router for the /mcp endpoint.
-    let mcp_handler: Arc<dyn recalld::mcp::McpHandler> = Arc::new(mcp_bridge);
+    let mcp_handler = recalld::mcp::single_namespace::handler(mcp_bridge, namespaces_mode).await;
     let mcp_router = recalld::mcp::mcp_router(mcp_handler, mcp_http_config);
 
     // Start the API server (blocks until shutdown signal).
@@ -864,6 +865,7 @@ async fn run_mcp(loaded: LoadedConfig) -> ExitCode {
     );
 
     let socket = recalld::daemon::socket_path();
+    let namespaces_mode = loaded.config.namespaces.mode;
     let default_ns = loaded.default_namespace.clone();
     let tz = recalld::time::resolve_timezone(&loaded.config.timezone);
 
@@ -889,7 +891,7 @@ async fn run_mcp(loaded: LoadedConfig) -> ExitCode {
         }
     };
 
-    let handler: Arc<dyn recalld::mcp::McpHandler> = Arc::new(bridge);
+    let handler = recalld::mcp::single_namespace::handler(bridge, namespaces_mode).await;
     let server = Arc::new(tokio::sync::Mutex::new(recalld::mcp::McpServer::new(
         handler,
     )));
@@ -924,6 +926,7 @@ async fn run_mcp_direct(mut loaded: LoadedConfig) -> ExitCode {
         }
     };
     let default_namespace = loaded.default_namespace;
+    let namespaces_mode = loaded.config.namespaces.mode;
     let system = match Recalld::new(loaded.config).await {
         Ok(s) => s,
         Err(e) => {
@@ -934,7 +937,7 @@ async fn run_mcp_direct(mut loaded: LoadedConfig) -> ExitCode {
 
     let bridge = create_direct_mcp_bridge(&system, default_namespace);
 
-    let handler: Arc<dyn recalld::mcp::McpHandler> = Arc::new(bridge);
+    let handler = recalld::mcp::single_namespace::handler(bridge, namespaces_mode).await;
     let server = Arc::new(tokio::sync::Mutex::new(recalld::mcp::McpServer::new(
         handler,
     )));

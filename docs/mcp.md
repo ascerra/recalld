@@ -109,6 +109,18 @@ namespace = "project-my-project"
 
 When recalld starts in MCP mode, it walks up from the current working directory to find the nearest `.recalld.toml`. The `namespace` field sets the default namespace for scoped MCP operations (store, recall, lists, stats, and duplicate scans) in that directory tree. If no `.recalld.toml` is found, the default namespace is `"default"`.
 
+### Single-namespace mode
+
+With `[namespaces] mode = "single"` in the config (or `RECALLD_NAMESPACES_MODE=single` in the MCP server's environment), every agent shares the `default` namespace:
+
+- The server instructions and the `get_session`, `store_memory`, `store_memories`, `recall_memories` and `list_namespaces` descriptions say that everything is in `default` and not to pass a namespace.
+- `create_namespace`, `delete_namespace` and `move_memories` are left out of `tools/list`. A direct call fails with an error naming the setting.
+- An explicit `namespace` other than `default` (including inside `store_memories` items), `allNamespaces: true` and `sameNamespace: false` fail with the same error. `"namespace": "default"` is accepted.
+- The `.recalld.toml` namespace is ignored, with a warning in the log.
+- At startup the server logs a warning naming other namespaces that still hold live memories. They are kept but not reachable through MCP; switch back to `"multi"` and use `move_memories` to consolidate them.
+
+The HTTP API and CLI are unchanged. Restart the MCP process and refresh tools after changing the mode.
+
 ### Optional by-ID namespace assertions
 
 `get_memory`, `reinforce_memory`, `forget_memory`, and single-mode `find_similar_memories` accept an optional `namespace` string. It asserts the namespace of the canonical record; it does not select a different scope. Omission keeps UUID-based scope even when the session default differs. An explicit mismatch (including a nonexistent namespace) fails with `NAMESPACE_MISMATCH` before embedding, access recording, or mutation. Unknown UUIDs remain not found. Null, empty strings, and invalid names are rejected as assertions.

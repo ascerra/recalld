@@ -264,7 +264,7 @@ enabled = true
 max_suppression = 0.15
 ```
 
-Additional sections: `[cache]`, `[log]`, `[ui]`.
+Additional sections: `[cache]`, `[log]`, `[ui]`, `[namespaces]` (`mode = "single"` keeps every MCP agent in `default`).
 
 See [docs/guide.md](docs/guide.md) for the full configuration reference, [docs/architecture.md](docs/architecture.md) for design details, and [docs/mcp.md](docs/mcp.md) for MCP integration including a ready-to-use prompt block for your `CLAUDE.md` or system prompt.
 

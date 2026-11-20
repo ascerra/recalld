@@ -105,6 +105,15 @@ pub const SERVER_INSTRUCTIONS: &str = "Start with get_session (or recalld://sess
     After upgrades, restart the MCP process and refresh tools; working reads do not prove write compatibility. \
     Forget is not backup erasure; dimensions do not prove model identity.";
 
+/// [`SERVER_INSTRUCTIONS`] for `[namespaces] mode = "single"`: no namespace guidance.
+pub const SINGLE_NAMESPACE_INSTRUCTIONS: &str = "Start with get_session (or recalld://session). Single-namespace mode: this server is one shared store and every memory is in default. \
+    Do not pass namespace; other namespaces cannot be created or reached here. By-ID operations use record scope. \
+    Store durable knowledge, not source-derived facts or every turn. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
+    Similarity is advisory: never automatically delete matches. Check every batch item. \
+    Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, storeId and original key/reservation. \
+    After upgrades, restart the MCP process and refresh tools; working reads do not prove write compatibility. \
+    Forget is not backup erasure; dimensions do not prove model identity.";
+
 // ── JSON-RPC error codes ────────────────────────────────────────────
 
 /// JSON-RPC parse error code.
