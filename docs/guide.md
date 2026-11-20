@@ -362,6 +362,16 @@ Logging output settings.
 
 Env vars: `RECALLD_LOG_LEVEL`, `RECALLD_LOG_FORMAT`, `RECALLD_LOG_FILE`
 
+### `[ui]`
+
+The local web UI (`recalld ui`; see [docs/ui.md](ui.md)).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Whether `recalld ui` may run. Set `false` to turn the browser UI off; agents and the MCP server are unaffected. |
+
+Env var: `RECALLD_UI_ENABLED`
+
 ### Top-level fields
 
 | Field | Type | Default | Description |

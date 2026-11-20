@@ -1,6 +1,38 @@
 # Changelog
 
-## 2.0.3 — unreleased
+## 2.1.0 — unreleased
+
+### Local web UI
+
+- Added `recalld ui`, a browser UI over your memories. It comes with the standard install and opens on `127.0.0.1`:
+  - **Memory map:** every memory as a node, sized by its links and current strength and colored by stage. When an agent recalls, the map replays recalld's real spreading-activation path: seeds bloom, light travels along the links that were followed, results keep a ring, and memories suppressed by retrieval-induced forgetting cool briefly. New and forgotten memories animate in and out, and clicking a memory brings its links forward. A **Decay** scrubber projects every memory up to a year ahead with recalld's FSRS formula.
+  - **Explore:** a fast, virtualized table of every memory with phase, strength, next phase change, namespace and last access. Filter by phase, tag, entity or agent, sort, and share the URL. Clicking a row opens it in place with its full text, labels, decay curve, activity and links.
+  - **Timeline**, **Health** (counts by phase, decay forecast, storage, daemon status, connected agents) and **Search** (⌘K, recalld's own hybrid search with a score breakdown).
+- Browsing never changes memory: every read uses recalld's read-only paths, so opening, searching or viewing a memory never reinforces it, resets its decay clock or triggers retrieval-induced forgetting. Only **Reinforce** and **Forget** (after a confirmation) write, through the same tool path agents use.
+- Security: the UI binds `127.0.0.1` only, checks the `Host` header (`127.0.0.1`, `localhost`, `recalld.localhost`), exchanges a per-launch token for an `HttpOnly`, `SameSite=Strict` cookie, sends no CORS headers and requires a custom header on writes.
+- The map pauses its layout and animation when the tab is hidden and stops entirely on other pages.
+- Activity entries name the agent and query behind each recall. The daemon keeps a bounded in-memory journal of the last 1,000 recalls and reinforcements for this.
+
+### Daemon
+
+- The daemon no longer shuts itself down when idle. `recalld daemon start` defaults to `--idle-timeout 0` (never); pass minutes to bring an idle shutdown back.
+- Fixed an overflow that made "no idle timeout" shut the daemon down at its first idle check whenever no client was connected. Auto-started daemons, which request no timeout, could exit about 30 seconds after the last client disconnected.
+- Idle MCP sessions no longer exhaust the daemon's 32 connection slots. Connections without a complete next request within 60 seconds are reclaimed, clients reconnect before sending after 30 seconds idle, and a full daemon returns a bounded "unavailable" response instead of starting another daemon or falling back to the locked store.
+
+### MCP
+
+- `list_tags` now reports entities, topics and emotions for native memories. They were previously missing because native records keep structured labels separately from tags.
+
+### Upgrade notes
+
+- The standard release archives and `install.sh` now include the UI. The separate `recalld-ui-*` archives and `RECALLD_UI=1` are gone.
+- Turn the UI off with `[ui] enabled = false` in the config or `RECALLD_UI_ENABLED=false`. Agents and the MCP server are unaffected.
+- The Docker image is built without the UI (`--no-default-features`) and is otherwise unchanged. To build from source without it, use `cargo build --release --no-default-features`.
+- From source, `make release` and `make install` now build the UI first, which needs Node 22.17+ and pnpm. A plain `cargo build` still works without Node; `recalld ui` then shows a page saying the UI wasn't built.
+- Restart the daemon and MCP server processes after upgrading. A daemon started by an older binary keeps its old idle timeout and has no UI support until restarted (`recalld daemon stop`).
+- Existing 2.0 databases need no migration.
+
+## 2.0.3 — 2026-11-19
 
 ### Namespaces and memory moves
 

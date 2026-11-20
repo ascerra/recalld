@@ -191,7 +191,7 @@ recalld mcp
 recalld serve
 ```
 
-**Daemon** -- Runs in the background with a Unix socket at `$XDG_RUNTIME_DIR/recalld/recalld.sock` on Linux, or `~/.recalld/recalld.sock` where there is no runtime directory (macOS), using JSON-RPC 2.0. Auto-shuts down after 30 minutes of idle time.
+**Daemon** -- Runs in the background with a Unix socket at `$XDG_RUNTIME_DIR/recalld/recalld.sock` on Linux, or `~/.recalld/recalld.sock` where there is no runtime directory (macOS), using JSON-RPC 2.0. It keeps running until stopped (`recalld daemon stop`); `recalld daemon start --idle-timeout <minutes>` adds an idle shutdown.
 
 ```sh
 recalld daemon
@@ -242,7 +242,7 @@ enabled = true
 max_suppression = 0.15
 ```
 
-Additional sections: `[cache]`, `[log]`.
+Additional sections: `[cache]`, `[log]`, `[ui]`.
 
 See [docs/guide.md](docs/guide.md) for the full configuration reference, [docs/architecture.md](docs/architecture.md) for design details, and [docs/mcp.md](docs/mcp.md) for MCP integration including a ready-to-use prompt block for your `CLAUDE.md` or system prompt.
 
