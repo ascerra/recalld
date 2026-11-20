@@ -90,18 +90,22 @@
     });
     return out;
   };
+  // Test hook: page coordinates of a node near the middle that is big enough
+  // to hover reliably (nodes scale with the layout, so some are tiny).
   perf.__recalldNodeAt = () => {
     if (!graph || !sigma) return null;
-    let best: { x: number; y: number } | null = null;
-    let bestD = Infinity;
+    const box = container.getBoundingClientRect();
     const w = container.clientWidth / 2, h = container.clientHeight / 2;
-    graph.forEachNode((_, a) => {
+    let best: { x: number; y: number } | null = null;
+    let bestScore = Infinity;
+    graph.forEachNode((id, a) => {
       if (a.visibility !== 'visible') return;
-      const p = sigma!.graphToViewport(a as { x: number; y: number });
-      const d = Math.hypot(p.x - w, p.y - h);
-      if (d < bestD) {
-        bestD = d;
-        best = p;
+      const p = sigma!.graphToViewport(drawn(id));
+      const r = sigma!.scaleSize(a.size as number);
+      const score = Math.hypot(p.x - w, p.y - h) + (r >= 3 ? 0 : 1e6);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { x: box.left + p.x, y: box.top + p.y };
       }
     });
     return best;

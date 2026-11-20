@@ -157,10 +157,11 @@ test('hover → tooltip', async ({ page }) => {
   await page.goto(stack.url);
   await page.goto(new URL('/map', stack.url).toString());
   await page.waitForFunction(() => performance.getEntriesByName('recalld:map-ready').length > 0);
+  // Hover a node that has stopped moving, at its exact page position.
+  await page.waitForFunction(() => (window as unknown as { __recalldSettled?: boolean }).__recalldSettled === true);
   const pos = await page.evaluate(() => (window as unknown as { __recalldNodeAt: () => { x: number; y: number } }).__recalldNodeAt());
-  const canvas = (await page.locator('.canvas-card').boundingBox())!;
   const t = await page.evaluate(() => performance.now());
-  await page.mouse.move(canvas.x + pos.x, canvas.y + pos.y);
+  await page.mouse.move(pos.x, pos.y);
   await page.locator('[role=tooltip]').waitFor();
   const shown = await page.evaluate(() => performance.now());
   results.hoverToTooltipMs = Math.round(shown - t);
