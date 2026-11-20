@@ -108,8 +108,9 @@ jobs:
           if grep -Eq '^\s+ui\s' help.txt; then echo "default build exposes 'ui'"; exit 1; fi
 
   default-build-unchanged:
-    # The optional `ui` feature must not change the default dependency set.
-    name: Default build unchanged
+    # The web UI is a default feature; a headless build (--no-default-features,
+    # as the Docker image uses) must keep the base branch's default dependencies.
+    name: Headless build unchanged
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -119,11 +120,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
-      - name: Compare default-feature dependency trees with the merge base
+      - name: Compare the headless dependency tree with the base's default
         run: |
           # Paths differ between the two checkouts; compare names, versions, features.
-          tree() { cargo tree --locked -e normal,build --prefix none --format '{p} {f}' | sed -E 's# \(/[^)]*\)##' | sort -u; }
-          tree > head.txt
+          # recalld's own feature list differs by design ("default" vs none), so drop it.
+          tree() { cargo tree --locked -e normal,build --prefix none --format '{p} {f}' "$@" | sed -E 's# \(/[^)]*\)##; s#^(recalld v[^ ]+) .*#\1#' | sort -u; }
+          tree --no-default-features > head.txt
           git worktree add ../base "$(git merge-base HEAD origin/${{ github.base_ref }})"
           (cd ../base && tree) > base.txt
           diff -u base.txt head.txt
