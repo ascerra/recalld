@@ -571,13 +571,7 @@ pub fn generate_default_config() -> String {
 
 [decay]
 # sweep_interval_hours = 24.0
-# permastore_threshold_days = 1500.0
 # decay_rate_multiplier = 1.0           # 1.0 = normal, 2.0 = 2x slower, 0.0 = disabled
-
-[decay.phase_thresholds]
-# full_to_summary = 0.7
-# summary_to_ghost = 0.3
-# ghost_to_delete = 0.05
 
 [cache]
 # max_capacity_bytes = 1073741824    # 1 GB

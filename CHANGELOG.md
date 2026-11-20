@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Changing `decay_rate_multiplier` no longer makes `recall_memories`, `store_memory`, `reinforce_memory` and `get_memory` fail, or skips every decay sweep, on a store created by 2.x. Startup now adopts the new value for each namespace that inherits it, with a receipt, and logs a `WARN` per namespace with the old and new value and how many memories move to Summary or Ghost or are deleted at the next sweep. If a namespace cannot be adopted (for example, it has more than 100,000 memories, the preview limit), startup continues, the namespace keeps its previous value, and a `WARN` says the change is not yet applied. A sweep that cannot resolve one namespace's policy now skips that namespace with a `WARN` instead of stopping the pass for all of them. (#232)
+
+### Deprecated
+
+- `[decay.phase_thresholds]` and `decay.permastore_threshold_days` (and `RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`, `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS`) never had an effect: thresholds are set per namespace. They are still accepted, startup logs a `WARN` when they differ from the defaults, and they are gone from the sample config and the guide. (#233)
+
 ## 2.1.2 — 2026-11-20
 
 ### Local web UI
