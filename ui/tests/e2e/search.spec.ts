@@ -12,8 +12,21 @@ test('⌘K searches with recalld’s hybrid search and explains the top result',
   await expect(best).toContainText('Connection bonus keeps well-linked memories in Full');
   await expect(best).toContainText(/vector \d\.\d\d/);
   await expect(dialog.getByText(/\d+ results · recalld hybrid search/)).toBeVisible();
+  // Opening a result keeps you where you are: on the map it is selected there.
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(/\/explore\?id=/);
+  await expect(page).toHaveURL(/\/map\?id=/);
+  await expect(page.getByRole('complementary', { name: 'Selected memory' }).getByRole('heading')).toHaveText(
+    'Connection bonus keeps well-linked memories in Full',
+  );
+});
+
+test('a result opened from Explore stays in Explore', async ({ page }) => {
+  await open(page, '/explore');
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('connection bonus keeps well-linked memories');
+  await expect(page.getByRole('option').first()).toContainText('Connection bonus keeps well-linked memories in Full');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/explore/);
   await expect(page.getByRole('complementary', { name: 'Selected memory' }).getByRole('heading')).toHaveText(
     'Connection bonus keeps well-linked memories in Full',
   );
