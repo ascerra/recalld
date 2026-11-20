@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Upgrade
+
+- The legacy vector ownership repair now ships in the release binary as `recalld --config CONFIG repair-legacy-vectors plan|apply ...`, with the same arguments and checks as the former `repair_legacy_vectors` source example, which is removed. Release-binary users no longer need a Rust toolchain to repair a 1.0 database that fails the 2.0 upgrade (#217).
+- When the automatic upgrade stops on a vector ownership mismatch (duplicate owner, freed slot still referenced, or missing slot), the startup error now ends by naming `recalld repair-legacy-vectors plan` and the "Repairing legacy vector ownership" section of `docs/guide.md`.
+
 ## 2.1.0 — unreleased
 
 ### Local web UI
