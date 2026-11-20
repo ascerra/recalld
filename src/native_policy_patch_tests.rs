@@ -155,13 +155,17 @@ async fn clearing_an_explicit_multiplier_binds_the_configured_one() {
     assert_eq!(binding.multiplier_bits, 1.5f32.to_bits());
     // Usable at once with the configured value, and bound to it.
     assert_eq!(configured.resolve(&ns).unwrap().decay_rate_multiplier, 1.5);
-    assert!(
+    // A different configured value doesn't move it: since #232 the stored
+    // binding wins until the change is adopted (at the next startup).
+    assert_eq!(
         NativePolicyInputs {
             multiplier: 3.0,
             ..Default::default()
         }
         .resolve(&ns)
-        .is_err()
+        .unwrap()
+        .decay_rate_multiplier,
+        1.5
     );
     let id = f.storage.read().unwrap().scan_all().unwrap()[0].0;
     assert!(
