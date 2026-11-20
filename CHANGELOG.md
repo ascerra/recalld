@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `delete_namespace` no longer refuses a small namespace as "operation too large" because another namespace is large. The admission check counted every memory and edge in the store against its 100,000-row bound; it now counts only the namespace being deleted and the edges that touch it, so an empty or tombstone-only namespace deletes without `force` and reports `tombstonesPurged`. A namespace that is itself too large is still refused.
+
 ## 2.1.1 — 2026-11-20
 
 ### Local web UI
@@ -8,7 +14,6 @@
 
 ### Fixed
 
-- `delete_namespace` no longer refuses a small namespace as "operation too large" because another namespace is large. The admission check counted every memory and edge in the store against its 100,000-row bound; it now counts only the namespace being deleted and the edges that touch it, so an empty or tombstone-only namespace deletes without `force` and reports `tombstonesPurged`. A namespace that is itself too large is still refused.
 - Decay sweeps on 2.x stores no longer stall for minutes. A startup or timer pass publishes derived views in batches of `write_batch_size` instead of after every memory (#220), and each commit reads only the memory's graph neighbourhood instead of every record and edge. Reads and writes are still refused while a pass runs, now for seconds rather than minutes on a store of about 1,200 memories. (#215)
 - `recalld backup` no longer claims `-d` for `--destination`, so the global `-d/--data-dir` works with it. Spell out `--destination`. (#219)
 - The guide no longer says the daemon shuts down after 30 idle minutes; since 2.1.0 it keeps running by default. (#218)
