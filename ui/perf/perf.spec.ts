@@ -171,8 +171,11 @@ test('hover → tooltip', async ({ page }) => {
 test('search keystroke → results', async ({ page }) => {
   await page.goto(stack.url);
   await page.goto(new URL('/explore', stack.url).toString());
+  // The palette shortcut works once the shell is up.
+  await page.getByText('read-only · daemon connected').waitFor();
   await page.keyboard.press('ControlOrMeta+k');
-  const input = page.getByRole('combobox');
+  const input = page.getByRole('dialog', { name: 'Search memories' }).getByRole('combobox');
+  await input.waitFor();
   const times: number[] = [];
   for (const q of ['kalo', 'mira tu', 'zone pasi', 'orveka', 'dori', 'lomi ra', 'tuve', 'sika', 'ranelo', 'pado']) {
     await input.fill('');
