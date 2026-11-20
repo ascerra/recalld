@@ -4,6 +4,7 @@
 
 ### Local web UI
 
+- The UI starts on the `default` namespace instead of All namespaces, which is lighter once memories live in project namespaces. **All namespaces** stays in the sidebar and scope menu, and a chosen scope is still remembered.
 - Long summaries in the map's detail panel show at a smaller size and clamp to four lines, with **Show whole summary** to expand.
 - Opening a row in Explore shows its whole summary instead of one truncated line.
 

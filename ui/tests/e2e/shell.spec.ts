@@ -18,6 +18,14 @@ test('the API refuses requests without the session cookie', async ({ browser }) 
   await ctx.close();
 });
 
+test('a fresh browser starts on the default namespace', async ({ page }) => {
+  const url = new URL(process.env.RECALLD_UI_URL!);
+  await page.goto(url.toString());
+  await page.goto(new URL('/explore', url.origin).toString());
+  await expect(page.getByRole('toolbar', { name: 'Filters' }).getByRole('button', { name: /default/ })).toBeVisible();
+  await expect(page.getByText('25 memories')).toBeVisible();
+});
+
 test('namespace scope is global and persists', async ({ page }) => {
   await open(page, '/explore');
   await page.getByRole('group', { name: 'Namespace scope' }).getByRole('button', { name: /topic-rust/ }).click();
