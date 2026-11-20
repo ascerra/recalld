@@ -19,11 +19,13 @@ export function connectEvents(onEvent: Listener, onState?: (connected: boolean) 
     };
     for (const kind of KINDS) {
       source.addEventListener(kind, (m) => {
+        let event: UiEvent;
         try {
-          onEvent(JSON.parse((m as MessageEvent).data) as UiEvent, performance.now());
+          event = JSON.parse((m as MessageEvent).data) as UiEvent;
         } catch {
-          /* ignore malformed frames */
+          return; // ignore malformed frames; handler errors still surface
         }
+        onEvent(event, performance.now());
       });
     }
     source.onerror = () => {

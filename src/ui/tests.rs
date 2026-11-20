@@ -720,7 +720,11 @@ async fn contract_memory_methods() {
     let history: AccessHistory =
         serde_json::from_value(c.call("access_history", json!({"id": a})).await.unwrap()).unwrap();
     // The recall above came from a named agent, so the daemon attributes it.
-    let recalled: Vec<_> = history.events.iter().filter(|e| e.kind == "direct").collect();
+    let recalled: Vec<_> = history
+        .events
+        .iter()
+        .filter(|e| e.kind == "direct")
+        .collect();
     assert!(!recalled.is_empty());
     for e in recalled {
         assert_eq!(e.agent.as_deref(), Some("claude-code"));

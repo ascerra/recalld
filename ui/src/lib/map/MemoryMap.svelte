@@ -80,10 +80,10 @@
   };
   perf.__recalldSettled = false;
   // Test hook: viewport positions of every visible node.
-  (perf as { __recalldPositions?: () => { id: string; x: number; y: number }[] }).__recalldPositions = () => {
-    const out: { id: string; x: number; y: number }[] = [];
+  (perf as { __recalldPositions?: () => { id: string; x: number; y: number; size: number }[] }).__recalldPositions = () => {
+    const out: { id: string; x: number; y: number; size: number }[] = [];
     graph?.forEachNode((id, a) => {
-      if (a.visibility === 'visible') out.push({ id, ...sigma!.graphToViewport(a as { x: number; y: number }) });
+      if (a.visibility === 'visible') out.push({ id, size: a.size as number, ...sigma!.graphToViewport(a as { x: number; y: number }) });
     });
     return out;
   };
@@ -250,6 +250,19 @@
     const t = performance.now();
     rings = rings.filter((r) => r.until > t);
     for (const r of rings) ring(r.id, 4.5, r.linked ? theme.moss : theme.accent, 1.3);
+    // Links growing out of a new memory.
+    for (const g of growing) {
+      const u = Math.min(1, Math.max(0, (t - g.start) / g.dur));
+      const k = g.retract ? (t < g.start ? 1 : 1 - easeIn(u)) : easeOut(u);
+      if (k <= 0 || !graph.hasNode(g.from) || !graph.hasNode(g.to)) continue;
+      const a = vp(g.from), b = vp(g.to);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k);
+      ctx.strokeStyle = alpha(theme.edge, 0.7);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
     if (hovered) ring(hovered, 5, theme.text, 1.5);
     if (selectedId) ring(selectedId, 7, theme.text, 1.6);
 
@@ -351,38 +364,180 @@
     }, FLASH_MS + 20);
   }
 
+  // ── A new memory's arrival ────────────────────────────────────────────
+  // It pops in with a slight overshoot and drifts into place, nearby memories
+  // are nudged outward and ease back, and its links grow out of it.
+  interface Motion { x0: number; y0: number; x1: number; y1: number; start: number; dur: number; ripple: boolean; size?: number; shrink?: boolean; done?: () => void }
+  const motions = new Map<string, Motion>();
+  let growing: { from: string; to: string; start: number; dur: number; key: string; visible: boolean; retract?: boolean }[] = [];
+  let animRaf = 0;
+  let lastTick = 0;
+  /** When each live memory appeared, so its first links can grow out of it. */
+  const bornAt = new Map<string, number>();
+  /** Graph units per screen pixel, so motion looks the same at any zoom. */
+  const unitsPerPx = () => {
+    const a = sigma!.viewportToGraph({ x: 0, y: 0 }), b = sigma!.viewportToGraph({ x: 1, y: 0 });
+    return Math.hypot(b.x - a.x, b.y - a.y);
+  };
+  const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+  const easeBack = (t: number) => 1 + 2.7 * Math.pow(t - 1, 3) + 1.7 * Math.pow(t - 1, 2);
+  const easeIn = (t: number) => t * t * t;
+
+  function animate() {
+    animRaf = 0;
+    if (!graph) return;
+    const now = performance.now();
+    for (const [id, m] of motions) {
+      if (!graph.hasNode(id)) {
+        motions.delete(id);
+        continue;
+      }
+      const t = Math.min(1, (now - m.start) / m.dur);
+      if (t < 0) continue;
+      // A ripple goes out and comes back; a move eases to its target.
+      const k = m.ripple ? (t >= 1 ? 0 : Math.sin(Math.PI * t)) : easeOut(t);
+      const a: Record<string, number> = { x: m.x0 + (m.x1 - m.x0) * k, y: m.y0 + (m.y1 - m.y0) * k };
+      if (m.size !== undefined) a.size = m.shrink ? m.size * (1 - easeIn(t)) : m.size * (t >= 1 ? 1 : Math.max(0, easeBack(t)));
+      graph.mergeNodeAttributes(id, a);
+      if (t >= 1) {
+        motions.delete(id);
+        m.done?.();
+      }
+    }
+    growing = growing.filter((g) => {
+      if (now < g.start + g.dur) return true;
+      if (!g.retract && graph!.hasEdge(g.key)) graph!.setEdgeAttribute(g.key, 'visibility', g.visible ? 'visible' : 'hidden');
+      return false;
+    });
+    drawOverlay();
+    if (motions.size || growing.length) animRaf = requestAnimationFrame(animate);
+  }
+  const play = () => {
+    if (!animRaf) animRaf = requestAnimationFrame(animate);
+  };
+
+  function moveTo(id: string, x: number, y: number, dur = 500) {
+    const a = graph!.getNodeAttributes(id) as { x: number; y: number };
+    if (reducedMotion) graph!.mergeNodeAttributes(id, { x, y });
+    else motions.set(id, { x0: a.x, y0: a.y, x1: x, y1: y, start: performance.now(), dur, ripple: false, size: motions.get(id)?.size });
+    play();
+  }
+
+  function birth(e: Extract<Received['event'], { kind: 'store' }>) {
+    const g = graph!;
+    const near = e.edges.filter((x) => g.hasNode(x.to)).map((x) => g.getNodeAttributes(x.to) as { x: number; y: number });
+    const cx = near.length ? near.reduce((a, p) => a + p.x, 0) / near.length + 4 : 0;
+    const cy = near.length ? near.reduce((a, p) => a + p.y, 0) / near.length + 4 : 0;
+    const enc = nodeAttributes(theme, e.phase, e.edges.length, false);
+    const now = performance.now();
+    bornAt.set(e.id, now);
+    const px = unitsPerPx();
+    const angle = Math.random() * Math.PI * 2;
+    const from = reducedMotion ? { x: cx, y: cy } : { x: cx + 40 * px * Math.cos(angle), y: cy + 40 * px * Math.sin(angle) };
+    g.addNode(e.id, { ...enc, x: from.x, y: from.y, index: -1, size: reducedMotion ? enc.size : 0 });
+    e.edges.forEach((x, i) => {
+      if (!g.hasNode(x.to)) return;
+      // A memory can link to the same neighbor more than once (one per type).
+      const key = `live-${e.seq}-${x.to}-${x.edgeType}`;
+      if (g.hasEdge(key)) return;
+      const visible = edgeTypes.has(x.edgeType);
+      g.addEdgeWithKey(key, e.id, x.to, { ...edgeAttributes(theme, x.edgeType, x.weight), type: x.edgeType, visibility: reducedMotion && visible ? 'visible' : 'hidden' });
+      if (!reducedMotion && visible) growing.push({ from: e.id, to: x.to, start: now + 180 + i * 70, dur: 380, key, visible });
+    });
+    if (reducedMotion) return;
+    motions.set(e.id, { x0: from.x, y0: from.y, x1: cx, y1: cy, start: now, dur: 700, ripple: false, size: enc.size });
+    // Nudge the closest memories outward, unless the layout is still moving them.
+    if (now - lastTick > 500) {
+      const R = 170 * px;
+      const close: { id: string; x: number; y: number; d: number }[] = [];
+      g.forEachNode((id, a) => {
+        if (id === e.id || a.visibility !== 'visible' || motions.has(id)) return;
+        const d = Math.hypot((a.x as number) - cx, (a.y as number) - cy);
+        if (d < R && d > 0) close.push({ id, x: a.x as number, y: a.y as number, d });
+      });
+      close.sort((a, b) => a.d - b.d);
+      for (const c of close.slice(0, 40)) {
+        const push = (3 + 9 * (1 - c.d / R)) * px;
+        const ux = (c.x - cx) / c.d, uy = (c.y - cy) / c.d;
+        motions.set(c.id, { x0: c.x, y0: c.y, x1: c.x + ux * push, y1: c.y + uy * push, start: now + 60, dur: 900, ripple: true });
+      }
+    }
+    play();
+  }
+
+  /** The reverse of birth: links pull back into the memory, it shrinks away,
+   *  and nearby memories drift in slightly before settling. */
+  function death(id: string) {
+    const g = graph!;
+    if (motions.get(id)?.shrink) return; // already leaving
+    const a = g.getNodeAttributes(id) as { x: number; y: number; size: number; visibility: string };
+    if (reducedMotion || a.visibility !== 'visible') {
+      g.setNodeAttribute(id, 'visibility', 'hidden');
+      return;
+    }
+    const now = performance.now();
+    g.forEachEdge(id, (key, attr, src, dst) => {
+      if (attr.visibility !== 'visible') return;
+      g.setEdgeAttribute(key, 'visibility', 'hidden');
+      growing.push({ from: id, to: src === id ? dst : src, start: now, dur: 320, key, visible: false, retract: true });
+    });
+    const size = a.size;
+    motions.set(id, {
+      x0: a.x, y0: a.y, x1: a.x, y1: a.y, start: now + 220, dur: 420, ripple: false, size, shrink: true,
+      done: () => g.hasNode(id) && g.mergeNodeAttributes(id, { visibility: 'hidden', size }),
+    });
+    if (now - lastTick > 500) {
+      const px = unitsPerPx();
+      const R = 170 * px;
+      const close: { id: string; x: number; y: number; d: number }[] = [];
+      g.forEachNode((n, b) => {
+        if (n === id || b.visibility !== 'visible' || motions.has(n)) return;
+        const d = Math.hypot((b.x as number) - a.x, (b.y as number) - a.y);
+        if (d < R && d > 0) close.push({ id: n, x: b.x as number, y: b.y as number, d });
+      });
+      close.sort((p, q) => p.d - q.d);
+      for (const c of close.slice(0, 40)) {
+        const pull = (2 + 6 * (1 - c.d / R)) * px;
+        motions.set(c.id, { x0: c.x, y0: c.y, x1: c.x - ((c.x - a.x) / c.d) * pull, y1: c.y - ((c.y - a.y) / c.d) * pull, start: now + 300, dur: 900, ripple: true });
+      }
+    }
+    play();
+  }
+
   function applyToGraph(e: Received['event']) {
     if (!graph) return;
     if (e.kind === 'store' && !graph.hasNode(e.id)) {
-      // Appears at its neighbors' centroid; later auto-links move it as they arrive.
-      const near = e.edges.filter((x) => graph!.hasNode(x.to)).map((x) => graph!.getNodeAttributes(x.to) as { x: number; y: number });
-      const cx = near.length ? near.reduce((a, p) => a + p.x, 0) / near.length + 4 : 0;
-      const cy = near.length ? near.reduce((a, p) => a + p.y, 0) / near.length + 4 : 0;
-      graph.addNode(e.id, { x: cx, y: cy, index: -1, ...nodeAttributes(theme, e.phase, e.edges.length, false) });
-      for (const x of e.edges) {
-        if (!graph.hasNode(x.to)) continue;
-        graph.addEdgeWithKey(`live-${e.seq}-${x.to}`, e.id, x.to, { ...edgeAttributes(theme, x.edgeType, x.weight), type: x.edgeType, visibility: edgeTypes.has(x.edgeType) ? 'visible' : 'hidden' });
-      }
+      birth(e);
       summaries.delete(e.id);
     } else if (e.kind === 'link' && graph.hasNode(e.src) && graph.hasNode(e.dst)) {
       const key = `live-${e.seq}`;
-      if (!graph.hasEdge(key)) graph.addEdgeWithKey(key, e.src, e.dst, { ...edgeAttributes(theme, e.edgeType, e.weight), type: e.edgeType, visibility: edgeTypes.has(e.edgeType) ? 'visible' : 'hidden' });
+      const visible = edgeTypes.has(e.edgeType);
+      // A new memory's first links grow out of it; others just appear.
+      const now = performance.now();
+      const young = [e.src, e.dst].find((id) => now - (bornAt.get(id) ?? -Infinity) < 4000);
+      const grow = visible && young !== undefined && !reducedMotion;
+      if (!graph.hasEdge(key)) {
+        graph.addEdgeWithKey(key, e.src, e.dst, { ...edgeAttributes(theme, e.edgeType, e.weight), type: e.edgeType, visibility: visible && !grow ? 'visible' : 'hidden' });
+        if (grow) {
+          growing.push({ from: young!, to: young === e.src ? e.dst : e.src, start: now + growing.filter((g) => g.from === young).length * 70, dur: 380, key, visible });
+          play();
+        }
+      }
       for (const id of [e.src, e.dst]) {
         if ((graph.getNodeAttribute(id, 'index') as number) !== -1) continue;
         const near = graph.neighbors(id).map((n) => graph!.getNodeAttributes(n) as { x: number; y: number });
-        if (near.length)
-          graph.mergeNodeAttributes(id, {
-            x: near.reduce((a, p) => a + p.x, 0) / near.length + 4,
-            y: near.reduce((a, p) => a + p.y, 0) / near.length + 4,
-            size: nodeAttributes(theme, 1, graph.degree(id), false).size,
-          });
+        if (near.length) {
+          // Glide to the new neighbors' centroid instead of jumping there.
+          graph.setNodeAttribute(id, 'size', nodeAttributes(theme, 1, graph.degree(id), false).size);
+          moveTo(id, near.reduce((a, p) => a + p.x, 0) / near.length + 4, near.reduce((a, p) => a + p.y, 0) / near.length + 4);
+        }
       }
     } else if (e.kind === 'phase_change' && graph.hasNode(e.id)) {
       const i = graph.getNodeAttribute(e.id, 'index') as number;
       const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1);
       graph.mergeNodeAttributes(e.id, { ...enc, phase: e.to, visibility: phases.has(e.to) ? enc.visibility : 'hidden' });
     } else if (e.kind === 'forget' && graph.hasNode(e.id)) {
-      graph.setNodeAttribute(e.id, 'visibility', 'hidden');
+      death(e.id);
     }
   }
 
@@ -556,8 +711,10 @@
       // Physics lives in the worker; the main thread only copies positions.
       worker = new LayoutWorker();
       const apply = (x: Float32Array, y: Float32Array) => {
+        lastTick = performance.now();
         graph!.updateEachNodeAttributes((_, a) => {
           const i = a.index as number;
+          if (i < 0) return a; // added live; the worker doesn't simulate it
           a.x = x[i];
           a.y = y[i];
           return a;
@@ -618,6 +775,7 @@
     light?.dispose();
     worker?.postMessage({ type: 'stop' } satisfies ToWorker);
     worker?.terminate();
+    cancelAnimationFrame(animRaf);
     sigma?.kill();
   });
 

@@ -437,6 +437,23 @@ impl UiService {
             .unwrap_or_else(|e| e.into_inner())
             .get(&conn.id)
             .and_then(|c| c.agent.clone());
+        let forget = active
+            && matches!(
+                method,
+                "delete_memory"
+                    | "delete_memories"
+                    | "delete_memory_scoped"
+                    | "forget_api1_v1"
+                    | "forget_native_v1"
+                    | "forget_lifecycle_v1"
+            );
+        let forgotten = if forget {
+            let mut ids = Vec::new();
+            uuids(params, 0, &mut ids);
+            ids
+        } else {
+            Vec::new()
+        };
         let store = active
             && matches!(
                 method,
@@ -469,6 +486,7 @@ impl UiService {
             }),
             reinforce,
             store,
+            forgotten,
             started_at: events::now_millis(),
         })
     }
@@ -612,6 +630,16 @@ impl UiService {
                 });
             }
         }
+        for id in &obs.forgotten {
+            events::publish(|seq, at| {
+                UiEvent::Forget(events::ForgetEvent {
+                    seq,
+                    at,
+                    agent: obs.agent.clone(),
+                    id: id.to_string(),
+                })
+            });
+        }
         if let Some((id, rating, before)) = obs.reinforce {
             events::journal(events::Note {
                 at: events::now_millis(),
@@ -685,6 +713,9 @@ pub struct Observation {
     query: Option<(String, String)>,
     reinforce: Option<(MemoryId, Option<u8>, Option<f32>)>,
     store: bool,
+    /// Memories a forget/delete call names; announced once it succeeds
+    /// (native forgets don't pass through the graph's removal hooks).
+    forgotten: Vec<MemoryId>,
     started_at: i64,
 }
 
