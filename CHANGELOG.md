@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Local web UI
+
+- Long summaries in the map's detail panel show at a smaller size and clamp to four lines, with **Show whole summary** to expand.
+- Opening a row in Explore shows its whole summary instead of one truncated line.
+
 ## 2.1.1 — 2026-11-20
 
 ### Local web UI
