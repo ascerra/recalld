@@ -159,9 +159,13 @@ export type AccessEventWire = { at: number,
  */
 kind: string, 
 /**
- * recalld does not persist who accessed a memory; always `null` here.
+ * The agent, when this daemon saw the call (recalld does not persist it).
  */
-agent: string | null, };
+agent: string | null, 
+/**
+ * The search that recalled it, when known.
+ */
+query: string | null, };
 
 export type ExplainParams = { query: string, namespace: string, limit: number | null, depth: number | null, };
 

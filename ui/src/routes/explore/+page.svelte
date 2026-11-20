@@ -216,7 +216,9 @@
           {#if padTop > 0}<tr style:height="{padTop}px" aria-hidden="true"></tr>{/if}
           {#each items as item (item.key)}
             {@const m = rowAt(item.index)}
-            <tr class="row" class:selected={m && m.id === selection.id} style:height="{item.size}px">
+            <!-- The whole row is a click target; the summary button is the keyboard path. -->
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+            <tr class="row" class:selected={m && m.id === selection.id} style:height="{item.size}px" onclick={() => m && selection.select(m.id)}>
               {#if m}
                 {@const r = strengthAt(m.lastAccessedAt, m.stability)}
                 <td class="first cell-btn">
@@ -313,6 +315,7 @@
   }
   .row {
     border-bottom: var(--hairline) solid var(--color-divider);
+    cursor: pointer;
   }
   .row.selected {
     background: var(--color-accent-soft);

@@ -719,7 +719,13 @@ async fn contract_memory_methods() {
     .unwrap();
     let history: AccessHistory =
         serde_json::from_value(c.call("access_history", json!({"id": a})).await.unwrap()).unwrap();
-    assert!(history.events.iter().all(|e| e.agent.is_none()));
+    // The recall above came from a named agent, so the daemon attributes it.
+    let recalled: Vec<_> = history.events.iter().filter(|e| e.kind == "direct").collect();
+    assert!(!recalled.is_empty());
+    for e in recalled {
+        assert_eq!(e.agent.as_deref(), Some("claude-code"));
+        assert_eq!(e.query.as_deref(), Some("decay sweep"));
+    }
 
     // The UI's detail read: the agent `get_memory` tool with recordAccess:false.
     let detail = d

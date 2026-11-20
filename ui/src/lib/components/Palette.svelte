@@ -2,6 +2,7 @@
      with explain. No UI-side index: every keystroke asks the daemon. -->
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { palette } from '$lib/palette.svelte';
   import { scope } from '$lib/scope.svelte';
   import { selection } from '$lib/selection.svelte';
@@ -81,10 +82,16 @@
     return parts.join(' · ');
   }
 
-  function open(h: UiSearchHit, onMap: boolean) {
+  /** Open a result where you are: on the map it is selected and centered
+   *  there, on Explore it opens in Explore; elsewhere (or with ⌘↵ / Ctrl+click)
+   *  it goes to the map. */
+  function open(h: UiSearchHit, toMap: boolean) {
     selection.select(h.id);
     palette.hide();
-    goto(onMap ? `/map?id=${h.id}` : `/explore?id=${h.id}`);
+    const here = page.url.pathname;
+    if (here.startsWith('/explore') && !toMap) return;
+    if (here.startsWith('/map')) goto(`/map?id=${h.id}`, { replace: true });
+    else goto(toMap ? `/map?id=${h.id}` : `/explore?id=${h.id}`);
   }
 
   function onkeydown(e: KeyboardEvent) {

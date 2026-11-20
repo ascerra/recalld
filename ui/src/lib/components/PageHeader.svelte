@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { palette } from '$lib/palette.svelte';
+  import Icon from './Icon.svelte';
   let { title, meta, children }: { title: string; meta?: string; children?: Snippet } = $props();
   const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 </script>
@@ -20,7 +21,7 @@
     aria-keyshortcuts="Meta+K Control+K /"
     onclick={() => palette.show()}
   >
-    <span>Search</span><kbd>{mac ? '⌘K' : 'Ctrl K'}</kbd>
+    <Icon name="search" stroke={1.8} /><span>Search</span><kbd>{mac ? '⌘K' : 'Ctrl K'}</kbd>
   </button>
 </header>
 
@@ -47,19 +48,17 @@
     color: var(--color-text-muted);
   }
   .search {
-    flex: 0 1 var(--search-w);
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
+    gap: var(--space-2);
     height: var(--button-h);
-    padding: 0 var(--space-2) 0 var(--space-4);
+    padding: 0 var(--space-2) 0 var(--space-3);
     border: var(--hairline) solid var(--color-border);
     border-radius: var(--radius-pill);
     background: var(--color-surface);
-    color: var(--color-text-muted);
-    font: var(--text-input) var(--font-sans);
-    cursor: text;
+    color: var(--color-text-2);
+    font: var(--text-control) var(--font-sans);
+    cursor: pointer;
     text-align: left;
   }
   .search:hover {

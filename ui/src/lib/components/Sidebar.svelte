@@ -47,7 +47,7 @@
 {:else}
   <aside class="sidebar" aria-label="Sidebar">
     <div class="brand">
-      <span class="wordmark"><Mark /><span>recalld</span></span>
+      <a class="wordmark" href="/map" aria-label="recalld: Memory map"><Mark /><span>recalld</span></a>
       <button type="button" class="icon-btn collapse" aria-label="Collapse sidebar" aria-expanded="true" onclick={() => prefs.toggleSidebar()}>
         <Icon name="collapse" stroke={1.8} />
       </button>
@@ -100,6 +100,8 @@
     gap: var(--space-2);
     font: var(--weight-medium) var(--text-wordmark) var(--font-serif);
     letter-spacing: -0.01em;
+    color: inherit;
+    text-decoration: none;
   }
   .collapse {
     margin-right: calc(var(--space-2) * -1);

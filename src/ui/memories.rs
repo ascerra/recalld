@@ -384,16 +384,27 @@ impl UiService {
             .iter()
             .rev()
             .take(limit)
-            .map(|e| AccessEventWire {
-                at: e.timestamp,
-                kind: match e.kind {
-                    AccessKind::DirectRetrieval => "direct",
-                    AccessKind::AssociativeRetrieval => "associative",
-                    AccessKind::DecaySweep => "sweep",
-                    AccessKind::ManualReinforcement => "reinforce",
+            .map(|e| {
+                let note = match e.kind {
+                    AccessKind::DecaySweep => None,
+                    kind => super::events::attribute(
+                        &p.id,
+                        e.timestamp,
+                        kind == AccessKind::ManualReinforcement,
+                    ),
+                };
+                AccessEventWire {
+                    at: e.timestamp,
+                    kind: match e.kind {
+                        AccessKind::DirectRetrieval => "direct",
+                        AccessKind::AssociativeRetrieval => "associative",
+                        AccessKind::DecaySweep => "sweep",
+                        AccessKind::ManualReinforcement => "reinforce",
+                    }
+                    .into(),
+                    agent: note.as_ref().and_then(|n| n.agent.clone()),
+                    query: note.and_then(|n| n.query.clone()),
                 }
-                .into(),
-                agent: None,
             })
             .collect();
         Ok(AccessHistory {

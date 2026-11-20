@@ -417,29 +417,8 @@ impl UiService {
     /// Prepare to observe one ordinary (non-UI) daemon call. `None` when
     /// nobody is subscribed, so an unwatched daemon does no extra work.
     pub fn observe(&self, conn: &Connection, method: &str, params: &Value) -> Option<Observation> {
-        if !events::active() {
-            return None;
-        }
-        let agent = self
-            .clients
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&conn.id)
-            .and_then(|c| c.agent.clone());
+        let active = events::active();
         let recall = matches!(method, "search" | "query_contract_v1");
-        let store = matches!(
-            method,
-            "store_memory"
-                | "store_api1_v1"
-                | "store_batch_api1_v1"
-                | "store_native_single_observed_v1"
-                | "mutate_batch"
-                | "mutate_native_batch_v1"
-                | "mutate_native_batch_observed_v1"
-        );
-        if !recall && !method.contains("read_only") {
-            events::note_writer(agent.as_deref());
-        }
         let reinforce = matches!(
             method,
             "reinforce_memory"
@@ -448,14 +427,38 @@ impl UiService {
                 | "feedback_native_v1"
                 | "feedback_lifecycle_v1"
         );
+        // Unwatched, only recalls and reinforcements are noted (for attribution).
+        if !active && !recall && !reinforce {
+            return None;
+        }
+        let agent = self
+            .clients
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&conn.id)
+            .and_then(|c| c.agent.clone());
+        let store = active
+            && matches!(
+                method,
+                "store_memory"
+                    | "store_api1_v1"
+                    | "store_batch_api1_v1"
+                    | "store_native_single_observed_v1"
+                    | "mutate_batch"
+                    | "mutate_native_batch_v1"
+                    | "mutate_native_batch_observed_v1"
+            );
+        if active && !recall && !method.contains("read_only") {
+            events::note_writer(agent.as_deref());
+        }
         let reinforce = reinforce.then(|| find_id(params)).flatten().map(|id| {
             let rating = find_u8(params, &["quality", "rating"]);
-            (id, rating, self.stability(id))
+            (id, rating, active.then(|| self.stability(id)).flatten())
         });
         Some(Observation {
             ctx: Arc::new(EventContext {
                 agent: agent.clone(),
-                recall: recall.then(|| Mutex::new(RecallTrace::default())),
+                recall: (active && recall).then(|| Mutex::new(RecallTrace::default())),
             }),
             agent,
             query: recall.then(|| {
@@ -492,6 +495,15 @@ impl UiService {
                 .unwrap_or_default();
             let returned = returned_ids(value);
             let agent = obs.agent.clone();
+            events::journal(events::Note {
+                at: events::now_millis(),
+                agent: agent.clone(),
+                query: Some(query.clone()),
+                ids: returned.clone(),
+            });
+            if !events::active() {
+                return;
+            }
             // The light shows what mattered: the strongest matches (not every
             // candidate the pipeline scored) and a deduplicated, bounded set of
             // suppressed competitors.
@@ -601,6 +613,15 @@ impl UiService {
             }
         }
         if let Some((id, rating, before)) = obs.reinforce {
+            events::journal(events::Note {
+                at: events::now_millis(),
+                agent: obs.agent.clone(),
+                query: None,
+                ids: vec![id.to_string()],
+            });
+            if !events::active() {
+                return;
+            }
             let after = self.stability(id);
             events::publish(|seq, at| {
                 UiEvent::Reinforce(events::ReinforceEvent {

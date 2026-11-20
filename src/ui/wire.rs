@@ -296,8 +296,10 @@ pub struct AccessEventWire {
     pub at: i64,
     /// `direct`, `associative`, `sweep` or `reinforce`.
     pub kind: String,
-    /// recalld does not persist who accessed a memory; always `null` here.
+    /// The agent, when this daemon saw the call (recalld does not persist it).
     pub agent: Option<String>,
+    /// The search that recalled it, when known.
+    pub query: Option<String>,
 }
 
 // ── search_explain_read_only ───────────────────────────────────────────

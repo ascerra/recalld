@@ -58,6 +58,43 @@ pub fn publish(make: impl FnOnce(u64, i64) -> UiEvent) {
     }
 }
 
+// ── Attribution journal ────────────────────────────────────────────────
+
+/// Who recalled or reinforced which memories, and with what query. recalld's
+/// stored access history has only times and kinds; the panel matches those
+/// against this journal. Kept whether or not a UI is open (one short lock per
+/// recall), bounded, and lost on restart.
+pub struct Note {
+    pub at: i64,
+    pub agent: Option<String>,
+    /// `None` for a reinforcement.
+    pub query: Option<String>,
+    pub ids: Vec<String>,
+}
+
+const JOURNAL_CAP: usize = 1000;
+static JOURNAL: std::sync::Mutex<std::collections::VecDeque<Arc<Note>>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+pub fn journal(note: Note) {
+    let mut j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
+    if j.len() == JOURNAL_CAP {
+        j.pop_front();
+    }
+    j.push_back(Arc::new(note));
+}
+
+/// The journal entry that best explains an access to `id` at `at`
+/// (stored access times are taken during the call, the note just after).
+pub fn attribute(id: &str, at: i64, reinforce: bool) -> Option<Arc<Note>> {
+    let j = JOURNAL.lock().unwrap_or_else(|e| e.into_inner());
+    j.iter()
+        .rev()
+        .filter(|n| n.query.is_none() == reinforce && (at - 1_000..=at + 10_000).contains(&n.at))
+        .find(|n| n.ids.iter().any(|x| x == id))
+        .cloned()
+}
+
 pub(crate) fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }

@@ -40,11 +40,21 @@
     [...(row.data?.entities ?? []), ...(row.data?.tags ?? [])].slice(0, 3).join(' · '),
   );
   const KINDS: Record<string, string> = {
-    direct: 'recalled',
-    associative: 'recalled through a link',
-    reinforce: 'reinforced',
-    sweep: 'checked by a decay sweep',
+    direct: 'found it searching',
+    associative: 'reached it through a link',
+    reinforce: 'reinforced it',
+    sweep: 'Decay sweep checked it',
   };
+  type Act = { at: number; kind: string; agent: string | null; query: string | null; n: number };
+  // Consecutive identical entries (same agent, kind and query) collapse into one row.
+  const acts = $derived(
+    (history.data?.events ?? []).reduce<Act[]>((out, e) => {
+      const last = out.at(-1);
+      if (last && last.kind === e.kind && last.agent === e.agent && last.query === e.query) last.n++;
+      else out.push({ at: e.at, kind: e.kind, agent: e.agent, query: e.query, n: 1 });
+      return out;
+    }, []),
+  );
 
   async function doReinforce(rating: number) {
     if (!row.data) return;
@@ -116,8 +126,15 @@
 
     <section class="activity" aria-label="Recent activity">
       <span class="micro-label">Activity</span>
-      {#each history.data?.events ?? [] as e, i (i)}
-        <div class="act"><span class="mono t">{ago(e.at)}</span><span>{e.agent ?? 'unknown agent'} <span class="muted">{KINDS[e.kind] ?? e.kind}</span></span></div>
+      {#each acts as e, i (i)}
+        <div class="act">
+          <span class="mono t">{ago(e.at)}</span>
+          <span>
+            {#if e.kind !== 'sweep'}{e.agent ?? 'An agent'}{/if}
+            <span class="muted">{KINDS[e.kind] ?? e.kind}{e.n > 1 ? ` · ${e.n}×` : ''}</span>
+            {#if e.query}<span class="q">“{e.query}”</span>{/if}
+          </span>
+        </div>
       {:else}
         <span class="muted small">No access recorded yet.</span>
       {/each}
@@ -260,6 +277,16 @@
     display: flex;
     gap: var(--space-3);
     font-size: var(--text-control);
+  }
+  .q {
+    display: block;
+    color: var(--color-text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .act > span:last-child {
+    min-width: 0;
   }
   .t {
     flex: 0 0 auto;
