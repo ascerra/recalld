@@ -481,7 +481,7 @@
     if (worker) {
       const to = content.map((x) => ({ to: simIndex(x.to, g.getNodeAttributes(x.to)), w: x.weight })).filter((l) => l.to >= 0);
       liveIndex.set(e.id, snapshot.ids.length + liveIndex.size);
-      worker.postMessage({ type: 'add', x: cx, y: cy, links: to } satisfies ToWorker);
+      worker.postMessage({ type: 'add', x: cx, y: cy, degree: e.edges.length, links: to } satisfies ToWorker);
     }
     if (reducedMotion) return;
     motions.set(e.id, { x0: cx, y0: cy, x1: cx, y1: cy, start: now, dur: 1100, ripple: false, size: enc.size, still: true });
@@ -534,10 +534,8 @@
           play();
         }
       }
-      for (const id of [e.src, e.dst]) {
-        if ((graph.getNodeAttribute(id, 'index') as number) !== -1) continue;
-        graph.setNodeAttribute(id, 'size', nodeAttributes(theme, 1, graph.degree(id), false).size);
-      }
+      // A live memory keeps the size it was born with: the layout sized its
+      // collision circle from that, and a bigger drawn node could overlap.
     } else if (e.kind === 'phase_change' && graph.hasNode(e.id)) {
       const i = graph.getNodeAttribute(e.id, 'index') as number;
       const enc = nodeAttributes(theme, e.to, i >= 0 ? snapshot.degree[i] : graph.degree(e.id), i >= 0 && snapshot.permastore[i] === 1, strengthAt(i), nsOf(e.id, graph.getNodeAttributes(e.id)));

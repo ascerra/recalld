@@ -20,6 +20,7 @@ let adjacency: number[][] = [];
 let links: { source: number | Node; target: number | Node; w: number }[] = [];
 let running = false;
 let dragging = false;
+let dragAt: { x: number; y: number } | null = null;
 /** One tick per frame and high friction, so every change after the first
  *  layout moves slowly, as if through thick fluid. The first layout of a
  *  view runs flat out instead, so a large map is ready quickly. */
@@ -62,6 +63,7 @@ async function run() {
   let frames = 0;
   while (sim && sim.alpha() > sim.alphaMin()) {
     sim.tick(paced ? 1 : 2);
+    separate(2);
     if (paced || ++frames % 2 === 0) {
       const { x, y } = positions();
       post({ type: 'tick', x, y, alpha: sim.alpha() }, [x.buffer, y.buffer]);
@@ -74,6 +76,7 @@ async function run() {
   if (sim) {
     // A local reheat is done: let the rest of the map move again.
     if (!dragging) release();
+    separate(200);
     const { x, y } = positions();
     freezeOffset();
     post({ type: 'settled', x, y }, [x.buffer, y.buffer]);
@@ -88,6 +91,35 @@ function freezeOffset() {
     cy += d.y!;
   }
   offset = [cx / (nodes.length || 1), cy / (nodes.length || 1)];
+}
+
+const collideRadius = (d: Node) => (d.gone ? 0 : d.r * 2.5 + 10);
+
+/** Collision as a hard constraint: moves overlapping nodes apart by position,
+ *  leaving every other node and all velocities untouched. Runs after each
+ *  physics step (friction would otherwise let links win briefly) and fully on
+ *  settle and on opening a saved layout. Drawn nodes sit well inside their
+ *  collision circles, so after this no two drawn nodes overlap. */
+function separate(passes: number) {
+  const collide = forceCollide<Node>(collideRadius).iterations(2);
+  collide.initialize(nodes, Math.random);
+  const vx = nodes.map((d) => d.vx ?? 0), vy = nodes.map((d) => d.vy ?? 0);
+  for (let k = 0; k < passes; k++) {
+    for (const d of nodes) d.vx = d.vy = 0;
+    collide(1);
+    let moved = false;
+    for (const d of nodes) {
+      if (d.fx != null || (!d.vx && !d.vy)) continue;
+      d.x! += d.vx!;
+      d.y! += d.vy!;
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  nodes.forEach((d, i) => {
+    d.vx = vx[i];
+    d.vy = vy[i];
+  });
 }
 
 /** Hold everything outside `near` still, so only that part of the map moves. */
@@ -168,7 +200,7 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       .force('link', forceLink<Node, (typeof links)[number]>(links).id((d) => d.i).distance(70)
         // d3's own normalization: a memory with many links isn't pulled in many times as hard.
         .strength((l) => (0.3 + 0.7 * l.w) / Math.min((l.source as unknown as Node).deg, (l.target as unknown as Node).deg)))
-      .force('collide', forceCollide<Node>((d) => (d.gone ? 0 : d.r * 2.5 + 10)).iterations(2))
+      .force('collide', forceCollide<Node>(collideRadius).iterations(2))
       .force('x', forceX<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
       .force('y', forceY<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
       .stop();
@@ -182,23 +214,32 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
       run();
     } else if (unknown.length === 0) {
       offset = [0, 0]; // cached layouts are already centered
+      separate(200); // a layout saved by an older build may have overlaps
       const { x, y } = positions();
       post({ type: 'settled', x, y }, [x.buffer, y.buffer]);
     } else run();
   } else if (m.type === 'drag' && sim) {
     const n = nodes[m.index];
     if (m.phase === 'start') {
-      // Reheat only the dragged node's 2-hop neighborhood: pin everything else.
+      dragging = true;
+      dragAt = null;
+      freezeOffset();
+      // A gentle, well-damped reheat of the neighborhood only.
+      sim.alphaTarget(0.04).alpha(Math.max(sim.alpha(), 0.06));
+    }
+    // Free the dragged node's 2-hop neighborhood and whatever is near it now,
+    // and pin the rest; re-done as it travels, so it can never be dropped onto
+    // a node that isn't allowed to move out of the way.
+    const raw = { x: m.x + offset![0], y: m.y + offset![1] };
+    if (m.phase !== 'end' && (!dragAt || Math.hypot(raw.x - dragAt.x, raw.y - dragAt.y) > 60)) {
+      dragAt = raw;
       const near = new Set([m.index]);
       for (const j of adjacency[m.index]) {
         near.add(j);
         for (const k of adjacency[j]) near.add(k);
       }
+      for (const o of nodes) if (!o.gone && Math.hypot(o.x! - raw.x, o.y! - raw.y) < 180) near.add(o.i);
       pinAllBut(near);
-      dragging = true;
-      // A gentle, well-damped reheat of the neighborhood only.
-      freezeOffset();
-      sim.alphaTarget(0.04).alpha(Math.max(sim.alpha(), 0.06));
     }
     // The main thread works in centered coordinates; the worker in raw ones.
     n.fx = m.x + offset![0];
@@ -213,7 +254,8 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     // A new memory joins the physics like any other, so it pushes its
     // neighbors aside (and they it) instead of landing on top of them.
     freezeOffset();
-    const i = nodes.length, deg = m.links.length;
+    // Sized by all its links, exactly as drawn, so its collision circle holds it.
+    const i = nodes.length, deg = m.degree;
     const node: Node = { i, r: nodeSize(deg), hub: hubness(deg), deg: Math.max(1, deg), x: m.x + offset![0], y: m.y + offset![1] };
     nodes.push(node);
     adjacency.push([]);

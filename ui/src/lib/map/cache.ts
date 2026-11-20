@@ -3,7 +3,7 @@
 import { get, set } from 'idb-keyval';
 
 // Bump the version when the layout forces change, so old layouts are redone.
-const key = (scope: string | null) => `positions:v6:${scope ?? '*'}`;
+const key = (scope: string | null) => `positions:v7:${scope ?? '*'}`;
 
 export async function loadPositions(scope: string | null): Promise<Map<string, [number, number]>> {
   try {

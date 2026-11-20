@@ -17,7 +17,7 @@ export type ToWorker =
     }
   | { type: 'drag'; phase: 'start' | 'move' | 'end'; index: number; x: number; y: number }
   /** A memory stored while the map is open; it takes the next index. */
-  | { type: 'add'; x: number; y: number; links: { to: number; w: number }[] }
+  | { type: 'add'; x: number; y: number; degree: number; links: { to: number; w: number }[] }
   /** A memory forgotten while the map is open: its neighbors close the gap. */
   | { type: 'remove'; index: number }
   | { type: 'stop' };
