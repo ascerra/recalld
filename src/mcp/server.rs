@@ -60,6 +60,11 @@ pub trait McpHandler: Send + Sync {
 
     /// Read a resource by URI and return its content.
     async fn read_resource(&self, uri: &str) -> Result<ResourceReadResult, String>;
+
+    /// Instructions surfaced by `initialize` and `server/discover`.
+    fn instructions(&self) -> &'static str {
+        SERVER_INSTRUCTIONS
+    }
 }
 
 // ── Request context and outcome ─────────────────────────────────────
@@ -240,7 +245,7 @@ impl McpDispatcher {
                 .map(|v| (*v).to_string())
                 .collect(),
             capabilities: server_capabilities(),
-            instructions: Some(SERVER_INSTRUCTIONS.to_string()),
+            instructions: Some(self.handler.instructions().to_string()),
         };
         Ok(Outcome::cacheable(
             serde_json::to_value(result)?,
@@ -289,7 +294,7 @@ impl McpDispatcher {
                 name: SERVER_NAME.to_string(),
                 version: SERVER_VERSION.to_string(),
             },
-            instructions: Some(SERVER_INSTRUCTIONS.to_string()),
+            instructions: Some(self.handler.instructions().to_string()),
         };
 
         Ok(Outcome::plain(serde_json::to_value(result)?))

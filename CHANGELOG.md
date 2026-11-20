@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Single-namespace mode for MCP: `[namespaces] mode = "single"` (or `RECALLD_NAMESPACES_MODE=single`) keeps every agent's memories in `default`. Agents are not told to choose or create namespaces, `create_namespace`, `delete_namespace` and `move_memories` are hidden, and a namespace other than `default` is rejected. The default, `"multi"`, is unchanged; the HTTP API and CLI are unaffected.
+
 ## 2.1.2 — 2026-11-20
 
 ### Local web UI

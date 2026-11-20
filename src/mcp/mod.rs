@@ -15,6 +15,7 @@ pub mod bridge;
 pub mod bridge_adapters;
 pub(crate) mod recovery_guidance;
 pub mod resources;
+pub mod single_namespace;
 mod tool_schema;
 pub mod tools;
 
