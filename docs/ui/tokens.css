@@ -38,7 +38,7 @@
 
   /* ── Graph ────────────────────────────────────────────────── */
   --color-node: #3C403A;          /* unlit memory node */
-  --color-node-lit: #4A6656;      /* node reached by a recall */
+  --color-node-lit: #579270;      /* node reached by a recall (3.2:1 on canvas) */
   --color-edge: #9EA39A;          /* base edge, opacity 0.4 × (0.55 + 0.6 × weight) */
   --color-suppressed: #AAB5BF;    /* RIF-suppressed competitor */
   --color-suppressed-text: #4C5A68;
@@ -48,7 +48,7 @@
   --color-label-halo: #F4F0E6;    /* 4px text stroke behind map labels */
 
   /* ── Agents (pulse + activity dot colors, assigned in order) ─ */
-  --color-agent-1: #4A6656;       /* e.g. claude-code */
+  --color-agent-1: #579270;       /* e.g. claude-code */
   --color-agent-2: #A3AA8A;       /* e.g. claude-desktop (moss) */
   --color-agent-3: #6F7F95;       /* slate */
   --color-agent-4: #9C8A4E;       /* brass */
