@@ -24,14 +24,20 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
   let seq = 0;
 
+  // The search filter starts from the page's namespace scope (All when none is
+  // set) each time the palette opens; changing it here doesn't change the page.
+  let searchScope = $state<string | null>(null);
   $effect(() => {
-    if (palette.open) queueMicrotask(() => input?.select());
+    if (palette.open) {
+      searchScope = scope.current;
+      queueMicrotask(() => input?.select());
+    }
   });
 
   // Debounce 120 ms; keep showing the last results while the next query runs.
   $effect(() => {
     const text = q.trim();
-    const ns = scope.current;
+    const ns = searchScope;
     clearTimeout(timer);
     if (!text) {
       result = null;
@@ -78,7 +84,7 @@
     if (boost > 0.005) parts.push(`text and entities +${boost.toFixed(2)}`);
     else if (h.vector === null && h.text !== null) parts.push('keyword match');
     if (h.contradicts) parts.push(`contradicts “${truncateWords(h.contradicts, 20)}”`);
-    if (!result?.merged || scope.current === null) parts.push(`${h.namespace} namespace`);
+    if (!result?.merged || searchScope === null) parts.push(`${h.namespace} namespace`);
     return parts.join(' · ');
   }
 
@@ -137,7 +143,7 @@
       <button type="button" class="esc" aria-label="Close search" onclick={() => palette.hide()}><kbd>Esc</kbd></button>
     </div>
     <div class="scope-row">
-      <ScopeChip />
+      <ScopeChip value={searchScope} onchange={(ns) => (searchScope = ns)} />
       <span class="note" title="Search here uses recordAccess:false, so results are not reinforced">Browsing won’t reinforce memories</span>
     </div>
 
