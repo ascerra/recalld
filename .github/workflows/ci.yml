@@ -108,8 +108,8 @@ jobs:
           grep -Eq '^\s+ui\s' help.txt || { echo "default build is missing 'ui'"; exit 1; }
 
   default-build-unchanged:
-    # The web UI is a default feature; a headless build (--no-default-features,
-    # as the Docker image uses) must keep the base branch's default dependencies.
+    # The web UI is a default feature; the headless build (--no-default-features,
+    # as the Docker image uses) must keep the base branch's headless dependencies.
     name: Headless build unchanged
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -120,14 +120,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
-      - name: Compare the headless dependency tree with the base's default
+      - name: Compare the headless dependency tree with the base's
         run: |
           # Paths differ between the two checkouts; compare names, versions, features.
-          # recalld's own feature list differs by design ("default" vs none), so drop it.
-          tree() { cargo tree --locked -e normal,build --prefix none --format '{p} {f}' "$@" | sed -E 's# \(/[^)]*\)##; s#^(recalld v[^ ]+) .*#\1#' | sort -u; }
+          # recalld's own version and features change with releases; compare its dependencies only.
+          tree() { cargo tree --locked -e normal,build --prefix none --format '{p} {f}' "$@" | sed -E 's# \(/[^)]*\)##; s#^recalld v.*#recalld#' | sort -u; }
           tree --no-default-features > head.txt
           git worktree add ../base "$(git merge-base HEAD origin/${{ github.base_ref }})"
-          (cd ../base && tree) > base.txt
+          # Before the UI existed, the base's default build was this headless build.
+          (cd ../base && tree --no-default-features) > base.txt
           diff -u base.txt head.txt
 
   docker:

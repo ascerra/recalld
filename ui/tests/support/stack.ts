@@ -42,9 +42,10 @@ export async function startStack(bin: string, kind: 'sample' | 'perf'): Promise<
     });
   });
   // `recalld ui` starts the daemon but stops waiting after 10 s; a debug
-  // daemon can take longer to open its store. Wait for its socket.
+  // daemon takes ~40 s to open its store on a fast machine and well over two
+  // minutes on a CI runner already running another stack. Wait for its socket.
   const socket = join(dir, 'recalld.sock');
-  for (let i = 0; i < 240 && !existsSync(socket); i++) await new Promise((r) => setTimeout(r, 500));
+  for (let i = 0; i < 720 && !existsSync(socket); i++) await new Promise((r) => setTimeout(r, 500));
   if (!existsSync(socket)) throw new Error('the daemon never opened its socket');
   const stop = () => {
     children.forEach((c) => c.kill());

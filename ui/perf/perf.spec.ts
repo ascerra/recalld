@@ -55,8 +55,11 @@ test.beforeAll(async () => {
   }
   const bin = process.env.RECALLD_BIN!;
   if (smoke) {
-    process.env.PERF_MEMORIES ??= '1000';
-    process.env.PERF_EDGES ??= '10000';
+    // CI generates the store with a debug binary; 1k / 10k took over 10 min
+    // there (past the hook timeout). 200 / 2k takes ~40 s and still
+    // exercises every measurement; budgets come from the full 10k / 100k run.
+    process.env.PERF_MEMORIES ??= '200';
+    process.env.PERF_EDGES ??= '2000';
   }
   const t = performance.now();
   stack = await startStack(bin, 'perf');
@@ -154,10 +157,11 @@ test('hover → tooltip', async ({ page }) => {
   await page.goto(stack.url);
   await page.goto(new URL('/map', stack.url).toString());
   await page.waitForFunction(() => performance.getEntriesByName('recalld:map-ready').length > 0);
+  // Hover a node that has stopped moving, at its exact page position.
+  await page.waitForFunction(() => (window as unknown as { __recalldSettled?: boolean }).__recalldSettled === true);
   const pos = await page.evaluate(() => (window as unknown as { __recalldNodeAt: () => { x: number; y: number } }).__recalldNodeAt());
-  const canvas = (await page.locator('.canvas-card').boundingBox())!;
   const t = await page.evaluate(() => performance.now());
-  await page.mouse.move(canvas.x + pos.x, canvas.y + pos.y);
+  await page.mouse.move(pos.x, pos.y);
   await page.locator('[role=tooltip]').waitFor();
   const shown = await page.evaluate(() => performance.now());
   results.hoverToTooltipMs = Math.round(shown - t);
@@ -167,8 +171,11 @@ test('hover → tooltip', async ({ page }) => {
 test('search keystroke → results', async ({ page }) => {
   await page.goto(stack.url);
   await page.goto(new URL('/explore', stack.url).toString());
+  // The palette shortcut works once the shell is up.
+  await page.getByText('read-only · daemon connected').waitFor();
   await page.keyboard.press('ControlOrMeta+k');
-  const input = page.getByRole('combobox');
+  const input = page.getByRole('dialog', { name: 'Search memories' }).getByRole('combobox');
+  await input.waitFor();
   const times: number[] = [];
   for (const q of ['kalo', 'mira tu', 'zone pasi', 'orveka', 'dori', 'lomi ra', 'tuve', 'sika', 'ranelo', 'pado']) {
     await input.fill('');

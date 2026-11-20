@@ -12,3 +12,6 @@ enabled = true
 
 [decay]
 sweep_interval_hours = 24.0
+
+[ui]
+enabled = true   # `recalld ui`, the local browser UI; false turns it off
