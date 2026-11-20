@@ -262,6 +262,10 @@ mod tests {
         assert_eq!(init["instructions"], SINGLE_NAMESPACE_INSTRUCTIONS);
         assert_ne!(SINGLE_NAMESPACE_INSTRUCTIONS, SERVER_INSTRUCTIONS);
         assert!(SINGLE_NAMESPACE_INSTRUCTIONS.split_whitespace().count() < 150);
+        assert!(
+            SINGLE_NAMESPACE_INSTRUCTIONS.starts_with("At task start, recall relevant context.")
+        );
+        assert!(!SINGLE_NAMESPACE_INSTRUCTIONS.contains("list_namespaces"));
         let discover = server
             .handle_message(modern_request(1, "server/discover", json!({})))
             .await

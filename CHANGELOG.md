@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
+
 ### Added
 
 - Single-namespace mode for MCP: `[namespaces] mode = "single"` (or `RECALLD_NAMESPACES_MODE=single`) keeps every agent's memories in `default`. Agents are not told to choose or create namespaces, `create_namespace`, `delete_namespace` and `move_memories` are hidden, and a namespace other than `default` is rejected. The default, `"multi"`, is unchanged; the HTTP API and CLI are unaffected.
