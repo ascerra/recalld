@@ -219,9 +219,12 @@ pub(super) fn admit(
             },
         ))?;
     }
+    // Only the target's rows and its incident edges count toward the bound.
+    // Unrelated rows are passed over unexamined, as the unbounded start path
+    // does; otherwise a large neighbouring namespace refuses a tiny purge.
+    let mut members = std::collections::HashSet::new();
     for row in tx.open_table(META_TABLE)?.iter()? {
         let (key, bytes) = row?;
-        scan.examine(bytes.value().len())?;
         let record = DiskRecord::from_bytes(bytes.value())?;
         if key.value() != record.id.as_slice() {
             return Err(StorageError::InvalidControl(
@@ -229,6 +232,8 @@ pub(super) fn admit(
             ));
         }
         if record.namespace_id == namespace.get() {
+            scan.examine(bytes.value().len())?;
+            members.insert(record.id);
             if record.access_history.len() > ACCESS_HISTORY_MAX {
                 return Err(StorageError::InvalidControl(
                     "native purge deletion history exceeds canonical bound".into(),
@@ -261,18 +266,18 @@ pub(super) fn admit(
     let edge_tx = edges.read_transaction()?;
     for row in edge_tx.open_table(FORWARD_EDGES)?.iter()? {
         let (key, bytes) = row?;
+        let edge = PersistedEdge::from_forward(key.value(), bytes.value())?;
+        if !members.contains(edge.source.as_bytes()) && !members.contains(edge.target.as_bytes()) {
+            continue;
+        }
         scan.examine(
             key.value()
                 .len()
                 .checked_add(bytes.value().len())
                 .ok_or_else(too_large)?,
         )?;
-        let edge = PersistedEdge::from_forward(key.value(), bytes.value())?;
         let source = scan.record(tx, edge.source)?;
-        let target = scan.record(tx, edge.target)?;
-        if source.namespace_id != namespace.get() && target.namespace_id != namespace.get() {
-            continue;
-        }
+        scan.record(tx, edge.target)?;
         count.element(&NativeEdgeProof::from(&edge))?;
         let before = scan.state(tx, &source)?;
         // Include target sources too: a different chunk can delete their target

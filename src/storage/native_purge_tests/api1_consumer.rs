@@ -2038,3 +2038,143 @@ async fn native_api1_purge_empty_cleanup_reports_observed_zero_and_directory_abs
         );
     }
 }
+
+/// A small tombstone-only namespace must not inherit the admission bound of a
+/// large neighbour. `kept` is a complete digraph of 184 records (33,672 edges);
+/// the store-wide scan examined 184 + 3 * 33,672 rows, past MAX_EXAMINATIONS
+/// (100,000), and refused `doomed` even though it has three tombstones only.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_api1_purge_tombstone_only_namespace_ignores_large_neighbour() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("source");
+    let target = root.path().join("native");
+    let mut engine = RedbStorageEngine::open(&source).unwrap();
+    let mut config = NamespaceConfig::default_namespace(100);
+    config.embedding_dim = 4;
+    let input = insertion::InsertMemory {
+        id: None,
+        summary: "neighbour".into(),
+        full_text: None,
+        tags: vec![],
+        initial_stability: None,
+        created_at: Some(1000),
+        embedding: Some(vec![1., 0., 0., 0.]),
+        parent_id: None,
+        supersedes: None,
+    };
+    config.name = "doomed".into();
+    let doomed = engine.create_namespace(&config).unwrap();
+    for _ in 0..3 {
+        let row = engine
+            .insert_memory_with_receipt(&MutationContext::unkeyed(doomed), &input, &[], 1000)
+            .unwrap();
+        engine
+            .tombstone_memory_with_receipt(
+                &MutationContext::unkeyed(doomed),
+                insertion::inserted_id(&row).unwrap(),
+            )
+            .unwrap();
+    }
+    config.name = "kept".into();
+    let kept = engine.create_namespace(&config).unwrap();
+    let ids: Vec<MemoryId> = (0..184)
+        .map(|_| {
+            let row = engine
+                .insert_memory_with_receipt(&MutationContext::unkeyed(kept), &input, &[], 1000)
+                .unwrap();
+            insertion::inserted_id(&row).unwrap()
+        })
+        .collect();
+    let mut edges = Vec::new();
+    for &source in &ids {
+        for &target in &ids {
+            if source != target {
+                edges.push(crate::storage::PersistedEdge {
+                    source,
+                    target,
+                    edge_type: crate::model::EdgeType::Associative,
+                    weight: 0.5,
+                    auto_created: false,
+                    created_at: 1000,
+                });
+            }
+        }
+    }
+    engine.edge_store().batch_add_edges(&edges).unwrap();
+    for &id in &ids {
+        engine
+            .meta_store()
+            .update_edge_count(id, 2 * (ids.len() as u16 - 1))
+            .unwrap();
+    }
+    engine.sync().unwrap();
+    drop(engine);
+    schema_migration::migrate_schema(
+        &source,
+        &target,
+        &schema_migration::MigrationOptions {
+            migration_now: 2000,
+            expected_source: schema_migration::inspect_schema(&source)
+                .unwrap()
+                .control
+                .generation_ref(),
+            attestations: vec![],
+        },
+    )
+    .unwrap();
+    let engine = RedbStorageEngine::open_with_ids(
+        &target,
+        true,
+        Box::new(crate::storage::ids::SeededIds::new([79; 32])),
+    )
+    .unwrap();
+    let fx = crate::test_support::Fixture::from_open_engine(root, engine);
+    publication(&fx).rebuild_all().await.unwrap();
+    let adapter = fx.namespace_adapter().with_clock(Arc::new(NoClock));
+
+    // The bound still holds for a namespace that is itself too large.
+    let before = counters(&fx);
+    let error = adapter
+        .delete_namespace_bounded(
+            DeleteNamespaceInput {
+                name: "kept".into(),
+                force: true,
+            },
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, BridgeError::TooLarge(m) if m.contains("operation too large")),
+        "{error:?}"
+    );
+    assert_eq!(counters(&fx), before);
+
+    let result = adapter
+        .delete_namespace_bounded(
+            DeleteNamespaceInput {
+                name: "doomed".into(),
+                force: false,
+            },
+            crate::daemon::protocol::LEGACY_MAX_MESSAGE_SIZE,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            result.id,
+            result.memories_deleted,
+            result.tombstones_purged,
+            result.edges_removed
+        ),
+        (doomed.get(), 0, 3, 0)
+    );
+    let engine = fx.storage.read().unwrap();
+    assert_eq!(
+        engine.edge_store().load_all_edges().unwrap().len(),
+        edges.len()
+    );
+    for id in ids {
+        assert!(engine.get_record(id).unwrap().is_some());
+    }
+}
