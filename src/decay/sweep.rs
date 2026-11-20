@@ -98,7 +98,8 @@ pub struct SweepConfig {
 
     /// Batch size for storage writes. Phase transitions and
     /// metadata updates are collected into batches of this size
-    /// before flushing to storage. Default: 256.
+    /// before flushing to storage. A native startup or timer pass
+    /// publishes derived views after this many commits. Default: 256.
     pub write_batch_size: usize,
 
     /// Dead-space ratio in fulltext.dat that triggers compaction.

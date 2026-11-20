@@ -1405,6 +1405,29 @@ pub(crate) fn crash_point(_point: &str) {
     }
 }
 
+/// The only canonical records [`validate_plan`] reads for this effect, or
+/// `None` when it needs every record.
+///
+/// A native phase write that puts, deletes, releases, removes and recounts
+/// nothing is checked against its own record alone: every other check in
+/// `validate_plan` is empty for that shape. Validating against this subset
+/// gives the same answer as a full scan without reading the whole store once
+/// per swept memory.
+pub(crate) fn validation_record_ids(effect: &PendingEffects) -> Option<Vec<MemoryId>> {
+    match &effect.receipt.outcome {
+        MutationOutcome::NativePhaseMaterialized { transition }
+            if effect.puts.is_empty()
+                && effect.deletes.is_empty()
+                && effect.releases.is_empty()
+                && effect.removed_ids.is_empty()
+                && effect.peer_counts.is_empty() =>
+        {
+            Some(vec![transition.memory_id])
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn validate_plan(
     effect: &PendingEffects,
     records: &[(MemoryId, DiskRecord)],
