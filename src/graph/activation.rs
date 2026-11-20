@@ -331,8 +331,7 @@ fn collect_neighbor_contributions(
         };
 
         // Fan = total degree of the NEIGHBOR (not the source node)
-        let fan_j = (neighbor.outgoing.len() + neighbor.incoming.len()) as f32;
-        let s_ji = (s_max - (fan_j + 1.0).ln()).max(0.0);
+        let s_ji = fan_strength(s_max, neighbor.outgoing.len() + neighbor.incoming.len());
 
         if s_ji > 0.0 {
             let contribution = s_ji
@@ -352,6 +351,13 @@ fn collect_neighbor_contributions(
         });
     }
     results
+}
+
+/// ACT-R association strength of a neighbour with `fan` edges:
+/// `max(0, s_max - ln(fan + 1))`. It falls as the fan grows and stays zero
+/// once it reaches zero, so a node at or past that fan never contributes.
+pub(crate) fn fan_strength(s_max: f32, fan: usize) -> f32 {
+    (s_max - (fan as f32 + 1.0).ln()).max(0.0)
 }
 
 // ═══════════════════════════════════════════════════════════════════════

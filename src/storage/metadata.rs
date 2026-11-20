@@ -164,6 +164,9 @@ pub struct MetadataStore {
     pub(crate) sweep_capture_fault: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     pub(crate) bounded_completion_failure_nth: std::sync::atomic::AtomicUsize,
+    /// The Nth derived publication with pending effects fails.
+    #[cfg(test)]
+    pub(crate) derived_publication_failure_nth: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
     pub(crate) bounded_completion_pause: std::sync::Mutex<
         Option<(
@@ -387,6 +390,8 @@ impl MetadataStore {
             sweep_capture_fault: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             bounded_completion_failure_nth: std::sync::atomic::AtomicUsize::new(0),
+            #[cfg(test)]
+            derived_publication_failure_nth: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
             bounded_completion_pause: std::sync::Mutex::new(None),
             publication: std::sync::RwLock::new(()),

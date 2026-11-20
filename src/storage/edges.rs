@@ -174,6 +174,9 @@ impl PersistedEdge {
 pub struct EdgeStore {
     db: Database,
     path: PathBuf,
+    /// How many times [`Self::load_all_edges`] has read every edge.
+    #[cfg(test)]
+    pub(crate) full_loads: std::sync::atomic::AtomicUsize,
 }
 
 impl EdgeStore {
@@ -198,6 +201,8 @@ impl EdgeStore {
         Ok(EdgeStore {
             db,
             path: path.to_path_buf(),
+            #[cfg(test)]
+            full_loads: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 
@@ -336,27 +341,14 @@ impl EdgeStore {
     ///
     /// Returns the total number of edges removed.
     pub(super) fn remove_all_edges(&self, memory_id: MemoryId) -> Result<usize, StorageError> {
-        let outgoing = self.get_outgoing_full(memory_id)?;
-        let incoming = self.get_incoming_full(memory_id)?;
-
-        if outgoing.is_empty() && incoming.is_empty() {
+        let edges = Self::incident_edges(&self.db.begin_read()?, memory_id)?;
+        if edges.is_empty() {
             return Ok(0);
         }
-
-        // Deduplicate: a self-loop appears in both outgoing and
-        // incoming.
-        let mut to_remove: Vec<(MemoryId, EdgeType, MemoryId)> =
-            Vec::with_capacity(outgoing.len() + incoming.len());
-
-        for edge in &outgoing {
-            to_remove.push((edge.source, edge.edge_type, edge.target));
-        }
-        for edge in &incoming {
-            let triple = (edge.source, edge.edge_type, edge.target);
-            if !to_remove.contains(&triple) {
-                to_remove.push(triple);
-            }
-        }
+        let to_remove: Vec<(MemoryId, EdgeType, MemoryId)> = edges
+            .iter()
+            .map(|e| (e.source, e.edge_type, e.target))
+            .collect();
 
         // Batch removal in a single transaction.
         let write_txn = self.db.begin_write()?;
@@ -438,6 +430,9 @@ impl EdgeStore {
     /// Load all edges from the forward index.
     /// Used for startup graph loading.
     pub fn load_all_edges(&self) -> Result<Vec<PersistedEdge>, StorageError> {
+        #[cfg(test)]
+        self.full_loads
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(FORWARD_EDGES)?;
 
@@ -459,46 +454,32 @@ impl EdgeStore {
     }
 }
 
-// ── Full-Edge Retrieval Helpers (internal) ───────────────────────────
+// ── Per-Node Edge Retrieval ──────────────────────────────────────────
 
 impl EdgeStore {
-    /// Return full `PersistedEdge` records for all outgoing edges.
-    fn get_outgoing_full(&self, source: MemoryId) -> Result<Vec<PersistedEdge>, StorageError> {
-        let read_txn = self.db.begin_read()?;
-        let table = read_txn.open_table(FORWARD_EDGES)?;
-
+    /// Every edge with `id` as source or target, each once (a self edge is
+    /// listed once, as [`Self::load_all_edges`] lists it). Two prefix scans of
+    /// `tx`, so a caller reading several nodes sees one edge snapshot.
+    pub(crate) fn incident_edges(
+        tx: &redb::ReadTransaction,
+        id: MemoryId,
+    ) -> Result<Vec<PersistedEdge>, StorageError> {
+        let fwd_table = tx.open_table(FORWARD_EDGES)?;
+        let rev_table = tx.open_table(REVERSE_EDGES)?;
         let mut start = [0u8; EDGE_KEY_SIZE];
-        start[0..16].copy_from_slice(source.as_bytes());
-
+        start[0..16].copy_from_slice(id.as_bytes());
         let mut end = [0u8; EDGE_KEY_SIZE];
-        end[0..16].copy_from_slice(source.as_bytes());
+        end[0..16].copy_from_slice(id.as_bytes());
         end[16..33].fill(0xFF);
 
         let mut edges = Vec::new();
-        for entry in table.range(start.as_slice()..=end.as_slice())? {
+        for entry in fwd_table.range(start.as_slice()..=end.as_slice())? {
             let (key_guard, value_guard) = entry?;
-            let edge = PersistedEdge::from_forward(key_guard.value(), value_guard.value())?;
-            edges.push(edge);
+            edges.push(PersistedEdge::from_forward(
+                key_guard.value(),
+                value_guard.value(),
+            )?);
         }
-
-        Ok(edges)
-    }
-
-    /// Return full `PersistedEdge` records for all incoming edges.
-    /// Looks up metadata from the forward index for each reverse key.
-    fn get_incoming_full(&self, target: MemoryId) -> Result<Vec<PersistedEdge>, StorageError> {
-        let read_txn = self.db.begin_read()?;
-        let fwd_table = read_txn.open_table(FORWARD_EDGES)?;
-        let rev_table = read_txn.open_table(REVERSE_EDGES)?;
-
-        let mut start = [0u8; EDGE_KEY_SIZE];
-        start[0..16].copy_from_slice(target.as_bytes());
-
-        let mut end = [0u8; EDGE_KEY_SIZE];
-        end[0..16].copy_from_slice(target.as_bytes());
-        end[16..33].fill(0xFF);
-
-        let mut edges = Vec::new();
         for entry in rev_table.range(start.as_slice()..=end.as_slice())? {
             let (rev_key_guard, _) = entry?;
             let rev_key = rev_key_guard.value();
@@ -507,6 +488,9 @@ impl EdgeStore {
             let target_bytes = &rev_key[0..16];
             let edge_type_byte = rev_key[16];
             let source_bytes = &rev_key[17..33];
+            if source_bytes == id.as_bytes().as_slice() {
+                continue; // A self edge, already listed as outgoing.
+            }
 
             let mut fwd_key = [0u8; EDGE_KEY_SIZE];
             fwd_key[0..16].copy_from_slice(source_bytes);
@@ -515,14 +499,12 @@ impl EdgeStore {
 
             // Fetch metadata from the forward index.
             if let Some(value_guard) = fwd_table.get(fwd_key.as_slice())? {
-                let edge = PersistedEdge::from_forward(&fwd_key, value_guard.value())?;
-                edges.push(edge);
+                edges.push(PersistedEdge::from_forward(&fwd_key, value_guard.value())?);
             }
             // If the forward entry is missing, the indexes are
             // inconsistent. Orphan cleanup will fix this on
             // the next startup.
         }
-
         Ok(edges)
     }
 }

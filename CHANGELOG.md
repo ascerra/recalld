@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- A native decay sweep no longer reads every memory and every edge for each memory it writes: the connection bonus and edge bookkeeping read only that memory's graph neighbourhood, so a pass grows linearly with the store instead of with its square. Results are unchanged ([#215](https://github.com/calebevans/recalld/issues/215)).
+
 ## 2.1.0 — unreleased
 
 ### Local web UI
