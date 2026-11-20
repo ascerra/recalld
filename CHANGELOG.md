@@ -6,6 +6,10 @@
 
 - docs/architecture.md gave the default decay timeline as about 36 days to Summary and 280 to Ghost; the formula gives about 16.5 and 160 (and about 6,300 days to removal, not 13,300). (#234)
 
+### Local web UI
+
+- The namespace menu in search (⌘K) opens above the search popup instead of behind it. Search starts from the page's namespace (All when none is set) and changing it there filters only the search, not every page.
+
 ## 2.1.2 — 2026-11-20
 
 ### Local web UI

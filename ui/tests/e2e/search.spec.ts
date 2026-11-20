@@ -42,3 +42,23 @@ test('/ opens the palette and Esc closes it', async ({ page }) => {
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: 'Search memories' })).toBeHidden();
 });
+
+test('search starts from the page scope and filters on its own', async ({ page }) => {
+  await open(page, '/explore');
+  const filters = page.getByRole('toolbar', { name: 'Filters' });
+  await page.getByRole('group', { name: 'Namespace scope' }).getByRole('button', { name: /topic-rust/ }).click();
+  await page.keyboard.press('ControlOrMeta+k');
+  const dialog = page.getByRole('dialog', { name: 'Search memories' });
+  const chip = dialog.getByRole('button', { name: /topic-rust/ });
+  await expect(chip).toBeVisible();
+  // The menu opens above the palette and can be clicked.
+  await chip.click();
+  await page.getByRole('menuitemradio', { name: /All namespaces/ }).click();
+  await expect(dialog.getByRole('button', { name: /All namespaces/ })).toBeVisible();
+  // The page keeps its own scope, and reopening starts from it again.
+  await page.getByRole('button', { name: 'Close search' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(filters.getByRole('button', { name: /topic-rust/ })).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(dialog.getByRole('button', { name: /topic-rust/ })).toBeVisible();
+});
