@@ -193,6 +193,13 @@
   });
 
   $effect(() => {
+    // Selecting a memory brings its neighborhood forward; deselecting clears it.
+    // Read the prop first so the effect tracks it even before the map exists.
+    const id = selectedId;
+    if (sigma && graph) emphasize(id && graph.hasNode(id) ? id : null);
+  });
+
+  $effect(() => {
     selectedId;
     highlighted;
     sigma?.refresh({ skipIndexation: true });
@@ -594,7 +601,7 @@
     return light;
   }
 
-  /** Hovering a memory highlights it, its neighbors and their links; sigma's
+  /** The selected memory, its neighbors and their links stay vivid; sigma's
    *  styles fade everything else (see `styles` below). */
   let emphasized: { nodes: string[]; edges: string[] } = { nodes: [], edges: [] };
   function emphasize(id: string | null) {
@@ -644,6 +651,7 @@
       dimAt = performance.now();
       dimRaf = requestAnimationFrame(dimFrame);
     }
+    sway();
   }
 
   function dimFrame(t: number) {
@@ -668,21 +676,24 @@
   }
 
   // ── Suspended in liquid ───────────────────────────────────────────────
-  // Drawing-only motion: every memory floats very slowly; the cursor stirs
-  // the memories near it; memories a recall lights sway a little more. The
-  // layout's positions never change, and the total offset (≤ 4 layout units)
-  // stays inside the gap between a drawn node and its collision circle, so
-  // nodes still can't overlap.
+  // Drawing-only motion, and only while something is happening: the cursor
+  // stirs the memories near it, and memories a recall lights sway gently.
+  // At rest nothing moves and no frame work runs. The layout's positions
+  // never change, and the offsets stay inside the gap between a drawn node
+  // and its collision circle, so nodes still can't overlap.
   type SwayNode = { x: number; y: number; wob?: number };
   type SwayState = FadeState & { t?: number; mx?: number; my?: number; stir?: number; reach?: number };
-  // Worst-case squeeze of two neighbors: float 2·1.4 + recall 2·1.4·1.2 + stir 3.5
-  // ≈ 10 layout units, under the ≥ 11-unit gap two collision circles leave.
-  const FLOAT = 1.4, STIR = 3.5, LIT_SWAY = 1.2;
+  // Worst-case squeeze of two neighbors: recall 2·2 + stir 3.5 ≈ 7.5 layout
+  // units, under the ≥ 11-unit gap two collision circles leave.
+  const STIR = 3.5, LIT_SWAY = 2;
   function swayOffset(a: SwayNode, st: Faded, gs: SwayState, axis: 0 | 1): number {
     if (gs.t === undefined || a.wob === undefined) return 0;
-    const w = 0.35 + (a.wob % 0.5) * 0.4; // each memory its own slow rhythm
-    const amp = FLOAT * (st.isLit ? 1 + LIT_SWAY * (gs.dim ?? 0) : 1);
-    let d = axis === 0 ? amp * Math.sin(gs.t * w + a.wob) : amp * Math.cos(gs.t * w * 0.8 + a.wob * 1.3);
+    let d = 0;
+    if (st.isLit && gs.dim) {
+      const w = 0.6 + (a.wob % 0.5) * 0.6; // each memory its own slow rhythm
+      const amp = LIT_SWAY * gs.dim;
+      d += axis === 0 ? amp * Math.sin(gs.t * w + a.wob) : amp * Math.cos(gs.t * w * 0.8 + a.wob * 1.3);
+    }
     if (gs.stir && gs.reach) {
       const dx = a.x - gs.mx!, dy = a.y - gs.my!, dist = Math.hypot(dx, dy) || 1;
       const fall = Math.exp(-((dist / gs.reach) ** 2));
@@ -699,18 +710,33 @@
     return { x: a.x + swayOffset(a, st, gs, 0), y: a.y + swayOffset(a, st, gs, 1) };
   }
   let swayRaf = 0, swayLast = 0, stir = 0, mouse: { x: number; y: number } | null = null, mouseAt = 0;
-  // ponytail: restyles every item per frame; skipped on very large maps.
+  let swayOn = false;
+  // ponytail: restyles every item per frame while moving; off on very large maps.
   const SWAY_MAX_NODES = 5000;
+  /** Start the motion loop (cursor moved or a recall lit up); it stops itself at rest. */
+  function sway() {
+    if (swayOn && !swayRaf) {
+      swayLast = performance.now();
+      swayRaf = requestAnimationFrame(swayFrame);
+    }
+  }
   function swayFrame(t: number) {
-    swayRaf = requestAnimationFrame(swayFrame);
-    if (!sigma || t - swayLast < 33) return; // ~30 fps is plenty for motion this slow
+    swayRaf = 0;
+    if (!sigma) return;
     const dt = t - swayLast;
-    swayLast = t;
-    // The stir rises while the cursor moves and settles back slowly.
-    stir = t - mouseAt < 120 ? Math.min(1, stir + dt / 400) : Math.max(0, stir - dt / 1600);
-    const m = mouse ? sigma.viewportToGraph(mouse) : { x: 0, y: 0 };
-    swayGs = { hasHighlighted: false, t: t / 1000, mx: m.x, my: m.y, stir, reach: 90 * unitsPerPx() };
-    sigma.setGraphState(swayGs as never);
+    if (dt >= 33) {
+      // ~30 fps is plenty for motion this slow.
+      swayLast = t;
+      // The stir rises while the cursor moves and settles back slowly.
+      stir = t - mouseAt < 120 ? Math.min(1, stir + dt / 400) : Math.max(0, stir - dt / 1600);
+      const m = mouse ? sigma.viewportToGraph(mouse) : { x: 0, y: 0 };
+      const motion = { t: t / 1000, mx: m.x, my: m.y, stir, reach: 90 * unitsPerPx() };
+      swayGs = { hasHighlighted: false, ...motion };
+      // Only the motion keys: sigma owns hasHighlighted and must keep it.
+      sigma.setGraphState(motion as never);
+      if (stir === 0 && dim === 0) return; // at rest: stop until something happens
+    }
+    swayRaf = requestAnimationFrame(swayFrame);
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -811,12 +837,13 @@
 
       sigma.on('afterRender', drawOverlay);
       if (!reducedMotion && graph.order <= SWAY_MAX_NODES) {
+        swayOn = true;
         container.addEventListener('pointermove', (ev) => {
           const r = container.getBoundingClientRect();
           mouse = { x: ev.clientX - r.left, y: ev.clientY - r.top };
           mouseAt = performance.now();
+          sway();
         });
-        swayRaf = requestAnimationFrame(swayFrame);
       }
       // Continuous zoom: sigma steps a fixed ratio per wheel event and drops
       // events that come close together, which makes trackpad pinches lurch.
@@ -843,9 +870,9 @@
         light = null; // no WebGL2: the map still works, without light
       }
       unsubscribe = live.subscribe(onLive);
+      if (selectedId && graph.hasNode(selectedId)) emphasize(selectedId);
       sigma.on('enterNode', ({ node }) => {
         hovered = node;
-        emphasize(node);
         ensureSummaries([node]);
         clearTimeout(hoverTimer);
         // Tooltip after --dur-fast (120 ms).
@@ -857,7 +884,6 @@
       });
       sigma.on('leaveNode', () => {
         hovered = null;
-        emphasize(null);
         tooltip = null;
         clearTimeout(hoverTimer);
         sigma!.refresh({ skipIndexation: true });
