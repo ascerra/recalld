@@ -159,6 +159,45 @@ fn runtime_rejection_keeps_original_and_durable_backup() {
     assert_eq!(inventory(&backups[0]).unwrap(), before);
 }
 #[test]
+fn ownership_mismatch_names_the_repair_command() {
+    use crate::model::DiskRecord;
+    use crate::storage::metadata::META_TABLE;
+    use redb::ReadableTable;
+    let (_root, path) = fixture();
+    let db = redb::Database::open(path.join("meta.db")).unwrap();
+    let tx = db.begin_write().unwrap();
+    {
+        let mut table = tx.open_table(META_TABLE).unwrap();
+        let rows: Vec<_> = table
+            .iter()
+            .unwrap()
+            .map(|r| DiskRecord::from_bytes(r.unwrap().1.value()).unwrap())
+            .collect();
+        let mut b = rows[1].clone();
+        b.namespace_id = rows[0].namespace_id;
+        b.vector_slot = rows[0].vector_slot;
+        table
+            .insert(b.id.as_slice(), b.encode().unwrap().as_slice())
+            .unwrap();
+    }
+    tx.commit().unwrap();
+    drop(db);
+    let before = inventory(&path).unwrap();
+    let message = open(&path).err().unwrap().to_string();
+    assert!(message.contains("duplicate vector owner"), "{message}");
+    assert!(
+        message.contains("original unchanged/restored; upgrade artifacts retained at "),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(
+            "; run `recalld repair-legacy-vectors plan` (see 'Repairing legacy vector ownership' in docs/guide.md)"
+        ),
+        "{message}"
+    );
+    assert_eq!(inventory(&path).unwrap(), before);
+}
+#[test]
 fn every_precommit_failure_restores_original() {
     for phase in [
         Phase::Preparing,

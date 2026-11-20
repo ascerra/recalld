@@ -4,9 +4,16 @@
 
 ### Fixed
 
-- A failed automatic 2.x upgrade no longer leaves another full copy of the database on every start attempt. When validation fails and the original is unchanged, the failure is recorded in `<data-directory>.recalld-upgrade-failed`; later starts on the same unchanged database with the same binary report the same error immediately without copying anything. Repairing or replacing the database, changing the recalld version or deleting that file retries the upgrade.
+- `recalld backup` no longer claims `-d` for `--destination`, so the global `-d/--data-dir` works with it. Spell out `--destination`. (#219)
+- The guide no longer says the daemon shuts down after 30 idle minutes; since 2.1.0 it keeps running by default. (#218)
+- A failed automatic 2.x upgrade no longer leaves another full copy of the database on every start attempt. When validation fails and the original is unchanged, the failure is recorded in `<data-directory>.recalld-upgrade-failed`; later starts on the same unchanged database with the same binary report the same error immediately without copying anything. Repairing or replacing the database, changing the recalld version or deleting that file retries the upgrade. (#216)
 
-## 2.1.0 — unreleased
+### Upgrade
+
+- The legacy vector ownership repair now ships in the release binary as `recalld --config CONFIG repair-legacy-vectors plan|apply ...`, with the same arguments and checks as the former `repair_legacy_vectors` source example, which is removed. Release-binary users no longer need a Rust toolchain to repair a 1.0 database that fails the 2.0 upgrade (#217).
+- When the automatic upgrade stops on a vector ownership mismatch (duplicate owner, freed slot still referenced, or missing slot), the startup error now ends by naming `recalld repair-legacy-vectors plan` and the "Repairing legacy vector ownership" section of `docs/guide.md`.
+
+## 2.1.0 — 2026-11-20
 
 ### Local web UI
 

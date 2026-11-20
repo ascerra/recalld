@@ -590,8 +590,14 @@ fn prepare_at(
     })();
     if let Err(error) = prepared {
         let unchanged = rollback(&j)?;
+        let hint = match error {
+            StorageError::OwnershipMismatch(_) => {
+                "; run `recalld repair-legacy-vectors plan` (see 'Repairing legacy vector ownership' in docs/guide.md)"
+            }
+            _ => "",
+        };
         let message = format!(
-            "{error}; original unchanged/restored; upgrade artifacts retained at {}",
+            "{error}; original unchanged/restored; upgrade artifacts retained at {}{hint}",
             j.root().display()
         );
         // I/O and redb errors may be transient (e.g. disk full): keep retrying those.
