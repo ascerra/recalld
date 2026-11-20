@@ -39,25 +39,29 @@ impl RedbStorageEngine {
         {
             return Ok(NativeDecayResult::Committed(receipt));
         }
-        let edges = self.edge_store.load_all_edges()?;
-        let mut ids = vec![intent.memory_id];
-        ids.extend(
-            edges
-                .iter()
-                .filter(|e| e.target == intent.memory_id)
-                .map(|e| e.source),
-        );
-        ids.sort();
-        ids.dedup();
-        let mut hashes = HashMap::new();
-        for id in ids {
-            if self.meta_store.get(id)?.is_some() {
-                hashes.insert(id, self.native_text_hash(id)?);
+        // One edge snapshot, read per node: a commit reads the memory's
+        // neighbourhood, not every edge.
+        let result = {
+            let snapshot = self.edge_store.read_transaction()?;
+            let mut ids = vec![intent.memory_id];
+            ids.extend(
+                EdgeStore::incident_edges(&snapshot, intent.memory_id)?
+                    .iter()
+                    .filter(|e| e.target == intent.memory_id)
+                    .map(|e| e.source),
+            );
+            ids.sort();
+            ids.dedup();
+            let mut hashes = HashMap::new();
+            for id in ids {
+                if self.meta_store.get(id)?.is_some() {
+                    hashes.insert(id, self.native_text_hash(id)?);
+                }
             }
-        }
-        let result = self.meta_store.decay_native_with_effects_bounded(
-            &guard, ctx, intent, policy, &edges, &hashes, admission,
-        )?;
+            self.meta_store.decay_native_with_effects_bounded(
+                &guard, ctx, intent, policy, &snapshot, &hashes, admission,
+            )?
+        };
         if let NativeDecayResult::Committed(receipt) = &result {
             if !receipt.replayed {
                 effects::apply_pending(

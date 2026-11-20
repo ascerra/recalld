@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Decay sweeps on 2.x stores no longer stall for minutes. A startup or timer pass publishes derived views in batches of `write_batch_size` instead of after every memory (#220), and each commit reads only the memory's graph neighbourhood instead of every record and edge. Reads and writes are still refused while a pass runs, now for seconds rather than minutes on a store of about 1,200 memories. (#215)
 - `recalld backup` no longer claims `-d` for `--destination`, so the global `-d/--data-dir` works with it. Spell out `--destination`. (#219)
 - The guide no longer says the daemon shuts down after 30 idle minutes; since 2.1.0 it keeps running by default. (#218)
 - A failed automatic 2.x upgrade no longer leaves another full copy of the database on every start attempt. When validation fails and the original is unchanged, the failure is recorded in `<data-directory>.recalld-upgrade-failed`; later starts on the same unchanged database with the same binary report the same error immediately without copying anything. Repairing or replacing the database, changing the recalld version or deleting that file retries the upgrade. (#216)

@@ -536,6 +536,19 @@ impl DerivedCompletion {
                                     "injected catalog derived publication failure".into(),
                                 ));
                             }
+                            #[cfg(test)]
+                            if storage
+                                .meta_store()
+                                .derived_publication_failure_nth
+                                .fetch_update(
+                                    std::sync::atomic::Ordering::SeqCst,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                    |remaining| remaining.checked_sub(1),
+                                )
+                                == Ok(1)
+                            {
+                                return Err(failed("injected derived publication failure".into()));
+                            }
                             // ponytail: O(records + edges) rebuild under the publication locks.
                             // Replace with exact effect application when throughput warrants it.
                             let scan = crate::performance::Timer::new("derived.canonical_records");

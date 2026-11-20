@@ -665,7 +665,16 @@ async fn native_timer_pass_publishes_per_batch_and_checks_each_write_against_its
             .recovery_scans
             .load(Ordering::SeqCst)
     };
+    let edge_loads = || {
+        f.storage
+            .read()
+            .unwrap()
+            .edge_store()
+            .full_loads
+            .load(Ordering::SeqCst)
+    };
     let before = scans();
+    let loads_before = edge_loads();
     // One hour on, every strength moves and no phase changes, so the pass
     // commits every memory: the five here plus the fixture's parent.
     let result = DecaySweepRunner::execute_sweep_with_work(
@@ -696,6 +705,9 @@ async fn native_timer_pass_publishes_per_batch_and_checks_each_write_against_its
     // publish after the first (on its own), the third, the fifth and the
     // last. Applying each write reads only that write's record.
     assert_eq!(scanned, 4);
+    // Every edge is read once per publication too, and never by a commit:
+    // each reads only its memory's neighbourhood (#215).
+    assert_eq!(edge_loads() - loads_before, 4);
     ready(&f).await;
     assert!(
         f.storage
@@ -781,6 +793,335 @@ async fn native_phase_effect_checked_against_its_own_record_matches_a_full_scan(
     );
     completion(&f).complete().await.unwrap();
     f.storage.read().unwrap().meta_store().finish_work(work);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_timer_pass_publication_failure_after_the_first_batch_names_its_first_waiting_commit()
+ {
+    // Seven commits in batches of two publish after the 1st, the 3rd, the 5th
+    // and, at the final flush, the 7th. Fail the 2nd publication (commits 2
+    // and 3 waiting) or the 4th (commits 6 and 7 waiting).
+    for (nth, first_waiting, scanned) in [(2, 2, 3), (4, 6, 7)] {
+        let (f, _) = setup_memories(6);
+        completion(&f).rebuild_all().await.unwrap();
+        ready(&f).await;
+        let before = target(&f).generation;
+        let generation = |n| (0..n).fold(before, |g, _| g.next().unwrap());
+        f.storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .derived_publication_failure_nth
+            .store(nth, Ordering::SeqCst);
+        let result = DecaySweepRunner::execute_sweep_with_work(
+            &SweepConfig {
+                write_batch_size: 2,
+                ..Default::default()
+            },
+            &crate::decay::DecayConfig::default(),
+            &Default::default(),
+            &f.storage,
+            &f.graph,
+            &f.cache,
+            1.,
+            Some(10_000 * DAY),
+            None,
+            Some(&completion(&f)),
+        )
+        .await;
+        assert_eq!(result.memories_scanned, scanned, "{result:?}");
+        assert_eq!(result.full_to_summary, scanned, "{result:?}");
+        assert_eq!(
+            target(&f).generation,
+            generation(scanned),
+            "no write after the failure"
+        );
+        let (receipt, _) = result.failed_commit.as_ref().expect("first waiting commit");
+        assert_eq!(receipt.committed_generation, generation(first_waiting));
+        let MutationOutcome::NativePhaseMaterialized { transition } = &receipt.outcome else {
+            panic!("not a native phase commit: {receipt:?}");
+        };
+        assert_eq!(result.errors.len(), 1, "{result:?}");
+        assert_eq!(result.errors[0].memory_id, transition.memory_id);
+        assert!(
+            result.errors[0]
+                .error
+                .contains("injected derived publication failure"),
+            "{result:?}"
+        );
+        assert!(result.publication_error.is_some());
+        assert!(!result.compaction_triggered);
+        assert!(result.compaction_receipt.is_none());
+        // The repair publishes every commit of the pass.
+        completion(&f).complete().await.unwrap();
+        ready(&f).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_deletion_recounts_a_peer_that_keeps_other_edges() {
+    // The fixture's parent links to all three; deleting one child leaves it
+    // two outgoing edges, which the commit reads per node, not from all edges.
+    let (f, ids) = setup_memories(3);
+    completion(&f).rebuild_all().await.unwrap();
+    let id = ids[0];
+    let parent = f
+        .storage
+        .read()
+        .unwrap()
+        .load_all_edges()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.target == id)
+        .unwrap()
+        .source;
+    let ns = scope_id(&f, id);
+    let policy = NativePolicyInputs::default();
+    let tracker = f.storage.read().unwrap().meta_store().work_tracker();
+    for phase in [Some(DecayPhase::Summary), Some(DecayPhase::Ghost), None] {
+        let work = tracker.begin().unwrap();
+        let capture = f
+            .storage
+            .read()
+            .unwrap()
+            .meta_store()
+            .capture_native_decay(id, ns, &policy, 10_000 * DAY)
+            .unwrap();
+        let context = MutationContext {
+            store_id: Some(f.storage.read().unwrap().control_state().unwrap().store_id),
+            scope: MutationScope::Namespace(ns),
+            idempotency_key: None,
+            expected_generation: None,
+            contract_version: 2,
+        };
+        assert!(matches!(
+            completion(&f)
+                .apply_native_decay_in_pass(context, capture, policy.clone(), &work)
+                .await
+                .unwrap(),
+            crate::storage::native_maintenance::NativeDecayResult::Committed(_)
+        ));
+        completion(&f).complete().await.unwrap();
+        f.storage.read().unwrap().meta_store().finish_work(work);
+        let current = f.storage.read().unwrap().get_record(id).unwrap();
+        assert_eq!(current.map(|r| r.phase), phase);
+    }
+    ready(&f).await;
+    let edges = f.storage.read().unwrap().load_all_edges().unwrap();
+    assert!(edges.iter().all(|e| e.source != id && e.target != id));
+    for other in [parent, ids[1], ids[2]] {
+        let outgoing = edges.iter().filter(|e| e.source == other).count();
+        assert_eq!(usize::from(row(&f, other).edge_count), outgoing);
+    }
+    assert_eq!(row(&f, parent).edge_count, 2);
+}
+
+/// The bonus as a native commit computed it before #215, from every row of the
+/// namespace and every edge: the oracle for the neighbourhood read.
+fn full_graph_bonus(
+    tx: &redb::WriteTransaction,
+    edges: &[crate::storage::PersistedEdge],
+    ns: &NamespaceConfig,
+    policy: &crate::decay::lifecycle::EffectiveLifecyclePolicy,
+    id: MemoryId,
+    now: i64,
+) -> f32 {
+    use redb::ReadableTable;
+    let mut graph = crate::graph::RelationshipGraph::new();
+    let mut donors = HashMap::new();
+    let mut ids = std::collections::HashSet::new();
+    for row in tx.open_table(META_TABLE).unwrap().iter().unwrap() {
+        let (_, bytes) = row.unwrap();
+        let r = DiskRecord::from_bytes(bytes.value()).unwrap();
+        if r.namespace_id != ns.id.get() {
+            continue;
+        }
+        let key = MemoryId::from_bytes(r.id);
+        ids.insert(key);
+        graph
+            .add_node(key, ns.id, r.phase, r.strength, r.vector_slot)
+            .unwrap();
+        let state = crate::storage::native_lifecycle::LifecycleState::capture(&r).unwrap();
+        if state.eligible() {
+            let p = crate::decay::lifecycle::project(
+                r.stability,
+                state.lifecycle.decay_anchor_at,
+                policy,
+                now.max(state.lifecycle.lifecycle_updated_at),
+                0.,
+            )
+            .unwrap();
+            donors.insert(key, p.strength);
+        }
+    }
+    for e in edges {
+        if ids.contains(&e.source) && ids.contains(&e.target) {
+            graph
+                .add_edge(e.source, e.target, e.edge_type, e.weight, e.auto_created)
+                .unwrap();
+        }
+    }
+    crate::graph::activation::connection_bonus_with_strengths(
+        id,
+        &graph,
+        &Default::default(),
+        &donors,
+    )
+}
+
+#[test]
+fn neighbourhood_bonus_equals_the_full_namespace_graph_bonus() {
+    use crate::model::EdgeType::*;
+    let root = tempfile::tempdir().unwrap();
+    let mut foreign = MemoryId::nil();
+    let d = certified_fixture_with_seed(root.path(), |engine| {
+        let mut ns = NamespaceConfig::default_namespace(0);
+        ns.name = "foreign".into();
+        ns.embedding_dim = 4;
+        let ns = engine.create_namespace(&ns).unwrap();
+        let input = crate::storage::insertion::InsertMemory {
+            id: None,
+            summary: "foreign".into(),
+            full_text: None,
+            tags: vec![],
+            initial_stability: None,
+            created_at: Some(1000),
+            embedding: Some(vec![1., 0., 0., 0.]),
+            parent_id: None,
+            supersedes: None,
+        };
+        foreign = crate::storage::insertion::inserted_id(
+            &engine
+                .insert_memory_with_receipt(&MutationContext::unkeyed(ns), &input, &[], 1000)
+                .unwrap(),
+        )
+        .unwrap();
+    });
+    let c = Arc::new(CountingClock::new(3000));
+    let mut session =
+        NativeLifecycleSession::open(&d.path, NativePolicyInputs::default(), c).unwrap();
+    let mut m = Vec::new();
+    for n in 0..16 {
+        let mut memory = input(&d);
+        memory.memory.initial_stability = Some(1. + n as f32 * 0.37);
+        let intent = session.capture_insert(scope(&d), &memory).unwrap();
+        let key = ctx(&session, &d, &format!("bonus-{n}"));
+        m.push(inserted(
+            &session
+                .insert_prepared(&key, &intent, &generated())
+                .unwrap(),
+        ));
+    }
+    // Every memory is already the child of the fixture's parent, whose fan is
+    // too high to contribute. On top: chains for two-hop paths, shared
+    // neighbours, two edge types between one pair, zero-factor edges, a self
+    // edge, a hub at the fan threshold, an edge into another namespace and
+    // one to a missing row.
+    let missing = MemoryId::from_bytes([0xab; 16]);
+    let edge =
+        |source: MemoryId, target: MemoryId, edge_type, weight| crate::storage::PersistedEdge {
+            source,
+            target,
+            edge_type,
+            weight,
+            auto_created: false,
+            created_at: 3000,
+        };
+    let mut synthetic = vec![
+        edge(m[0], m[1], Associative, 0.9),
+        edge(m[0], m[1], Entity, 0.2),
+        edge(m[1], m[2], Entity, 0.8),
+        edge(m[2], m[3], Causal, 0.7),
+        edge(m[3], m[4], Temporal, 0.6),
+        edge(m[0], m[5], Associative, 0.5),
+        edge(m[5], m[2], Associative, 0.4),
+        edge(m[1], m[5], ParentChild, 0.3),
+        edge(m[1], m[7], Temporal, 0.75),
+        edge(m[6], m[0], Contradicts, 1.),
+        edge(m[7], m[6], Supersedes, 1.),
+        edge(m[3], foreign, Associative, 1.),
+        edge(foreign, m[4], Entity, 1.),
+        edge(m[4], missing, Associative, 1.),
+        edge(m[8], m[8], Associative, 0.5),
+        edge(m[8], m[0], Associative, 0.6),
+        edge(m[0], m[9], Associative, 0.95),
+        edge(m[10], m[11], Entity, 0.85),
+    ];
+    for hub_child in &m[10..16] {
+        synthetic.push(edge(m[9], *hub_child, Associative, 0.9));
+    }
+    session
+        .engine
+        .edge_store()
+        .batch_add_edges(&synthetic)
+        .unwrap();
+    let edges = session.engine.load_all_edges().unwrap();
+    let snapshot = session.engine.edge_store().read_transaction().unwrap();
+    let tx = session.metadata().db.begin_write().unwrap();
+    // Mixed phases and eligibility, inside a transaction that is never
+    // committed: two ghosts, a summary without one (no donor), a summary.
+    {
+        let mut rows = tx.open_table(META_TABLE).unwrap();
+        for (index, phase, keep_summary) in [
+            (2, DecayPhase::Ghost, false),
+            (5, DecayPhase::Summary, false),
+            (4, DecayPhase::Summary, true),
+            (11, DecayPhase::Ghost, false),
+        ] {
+            let mut r = DiskRecord::from_bytes(
+                rows.get(m[index].as_bytes().as_slice())
+                    .unwrap()
+                    .unwrap()
+                    .value(),
+            )
+            .unwrap();
+            r.phase = phase;
+            if !keep_summary {
+                r.summary.clear();
+            }
+            if phase == DecayPhase::Ghost {
+                // As the native ghost patch removes them.
+                r.text_offset = 0;
+                r.text_length = 0;
+                r.summary.clear();
+                r.tags.clear();
+                let labels = &mut r.schema.as_mut().unwrap().labels;
+                labels.entities.clear();
+                labels.topics.clear();
+                labels.emotions.clear();
+            }
+            rows.insert(
+                m[index].as_bytes().as_slice(),
+                r.encode().unwrap().as_slice(),
+            )
+            .unwrap();
+        }
+    }
+    let ns = NamespaceConfig::decode(
+        tx.open_table(NAMESPACE_TABLE)
+            .unwrap()
+            .get(d.ns.get())
+            .unwrap()
+            .unwrap()
+            .value(),
+    )
+    .unwrap();
+    let policy =
+        crate::decay::lifecycle::resolve_policy(&ns, &crate::decay::DecayConfig::default(), 1.)
+            .unwrap();
+    let mut nonzero = 0;
+    for now in [3000 + DAY / 2, 3000 + 3 * DAY] {
+        for id in m.iter().copied().chain([d.parent, foreign, missing]) {
+            let expected = full_graph_bonus(&tx, &edges, &ns, &policy, id, now);
+            let actual = crate::storage::metadata::native_maintenance::canonical_bonus(
+                &tx, &snapshot, &ns, &policy, id, now,
+            )
+            .unwrap();
+            assert_eq!(actual.to_bits(), expected.to_bits(), "{id} at {now}");
+            nonzero += usize::from(expected > 0.);
+        }
+    }
+    assert!(nonzero >= 12, "fixture too sparse: {nonzero}");
 }
 
 fn scope_id(f: &Fixture, id: MemoryId) -> crate::model::NamespaceId {

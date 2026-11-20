@@ -1,5 +1,5 @@
 use super::*;
-use crate::storage::PersistedEdge;
+use crate::storage::EdgeStore;
 use crate::storage::native_lifecycle::{LifecycleScope, NativePolicyInputs};
 use crate::storage::native_maintenance::*;
 use crate::storage::native_records::{NativeEdgeProof, NativeRecordChange, NativeRecordState};
@@ -135,10 +135,18 @@ impl MetadataStore {
         ctx: &MutationContext,
         intent: &NativeDecayIntent,
         policy: &NativePolicyInputs,
-        edges: &[PersistedEdge],
+        edge_snapshot: &redb::ReadTransaction,
         text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
     ) -> Result<NativeDecayResult, StorageError> {
-        self.decay_native_with_effects_bounded(guard, ctx, intent, policy, edges, text_hashes, None)
+        self.decay_native_with_effects_bounded(
+            guard,
+            ctx,
+            intent,
+            policy,
+            edge_snapshot,
+            text_hashes,
+            None,
+        )
     }
 
     pub(crate) fn decay_native_with_effects_bounded(
@@ -147,7 +155,8 @@ impl MetadataStore {
         ctx: &MutationContext,
         intent: &NativeDecayIntent,
         policy: &NativePolicyInputs,
-        edges: &[PersistedEdge],
+        // One snapshot of the edge store, read per node.
+        edge_snapshot: &redb::ReadTransaction,
         text_hashes: &HashMap<MemoryId, Option<[u8; 32]>>,
         admission: Option<&crate::storage::maintenance::ReceiptAdmission>,
     ) -> Result<NativeDecayResult, StorageError> {
@@ -174,6 +183,7 @@ impl MetadataStore {
         let record = current
             .remove(&intent.memory_id)
             .ok_or(StorageError::NotFound(intent.memory_id.into_inner()))?;
+        let edges = EdgeStore::incident_edges(edge_snapshot, intent.memory_id)?;
         let before = NativeRecordState::capture(
             &record,
             &ns,
@@ -186,7 +196,7 @@ impl MetadataStore {
         } else {
             canonical_bonus(
                 &tx,
-                edges,
+                edge_snapshot,
                 &ns,
                 &resolved,
                 intent.memory_id,
@@ -247,7 +257,7 @@ impl MetadataStore {
                     tx,
                     ctx,
                     hash,
-                    edges,
+                    &edges,
                     &[],
                     &[],
                     false,
@@ -278,8 +288,16 @@ impl MetadataStore {
                     .collect::<Vec<_>>();
                 ids.sort();
                 ids.dedup();
+                // The effect recounts each peer's outgoing edges, so it gets
+                // every one of them besides the memory's own.
+                let mut edges = edges;
                 let mut peers = Vec::new();
                 for id in ids {
+                    edges.extend(
+                        EdgeStore::incident_edges(edge_snapshot, id)?
+                            .into_iter()
+                            .filter(|e| e.source == id && e.target != intent.memory_id),
+                    );
                     let peer = DiskRecord::from_bytes(
                         tx.open_table(META_TABLE)?
                             .get(id.as_bytes().as_slice())?
@@ -330,7 +348,7 @@ impl MetadataStore {
                     tx,
                     ctx,
                     hash,
-                    edges,
+                    &edges,
                     &[],
                     &[intent.memory_id],
                     true,
@@ -346,54 +364,135 @@ impl MetadataStore {
         }
     }
 }
-fn canonical_bonus(
+/// The connection bonus of `id` over its namespace graph, read from the part
+/// of that graph the bonus reaches instead of all of it: `id` with every
+/// edge, its neighbours, and the neighbours of each neighbour whose fan lets
+/// it contribute. Every node whose fan the bonus reads gets every
+/// in-namespace edge, or enough of them that its fan contributes nothing,
+/// so the result is the bonus over the whole namespace graph.
+pub(super) fn canonical_bonus(
     tx: &redb::WriteTransaction,
-    edges: &[PersistedEdge],
+    edge_snapshot: &redb::ReadTransaction,
     ns: &NamespaceConfig,
     policy: &crate::decay::lifecycle::EffectiveLifecyclePolicy,
     id: MemoryId,
     now: i64,
 ) -> Result<f32, StorageError> {
-    let mut graph = crate::graph::RelationshipGraph::new();
-    let mut donors = HashMap::new();
-    let mut ids = std::collections::HashSet::new();
-    for row in tx.open_table(META_TABLE)?.iter()? {
-        let (_, bytes) = row?;
-        let r = DiskRecord::from_bytes(bytes.value())?;
-        if r.namespace_id != ns.id.get() {
-            continue;
+    let config = crate::graph::activation::ActivationConfig::default();
+    let mut local = Neighbourhood {
+        rows: tx.open_table(META_TABLE)?,
+        edge_snapshot,
+        ns,
+        policy,
+        now,
+        s_max: config.s_max,
+        graph: crate::graph::RelationshipGraph::new(),
+        donors: HashMap::new(),
+        members: HashMap::new(),
+        added: std::collections::HashSet::new(),
+        expanded: HashMap::new(),
+    };
+    if !local.member(id)? {
+        return Ok(0.);
+    }
+    for j in local.expand(id, false)? {
+        let next = local.expand(j, true)?;
+        if config.include_2hop && local.contributes(j) {
+            for k in next {
+                local.expand(k, true)?;
+            }
         }
-        let key = MemoryId::from_bytes(r.id);
-        ids.insert(key);
-        graph
-            .add_node(key, ns.id, r.phase, r.strength, r.vector_slot)
+    }
+    Ok(crate::graph::activation::connection_bonus_with_strengths(
+        id,
+        &local.graph,
+        &config,
+        &local.donors,
+    ))
+}
+
+/// Canonical rows (read by ID) and edges around one memory, as the
+/// namespace graph and donor strengths hold them.
+struct Neighbourhood<'a, 't> {
+    rows: redb::Table<'t, &'static [u8], &'static [u8]>,
+    edge_snapshot: &'a redb::ReadTransaction,
+    ns: &'a NamespaceConfig,
+    policy: &'a crate::decay::lifecycle::EffectiveLifecyclePolicy,
+    now: i64,
+    s_max: f32,
+    graph: crate::graph::RelationshipGraph,
+    donors: HashMap<MemoryId, f32>,
+    members: HashMap<MemoryId, bool>,
+    added: std::collections::HashSet<(MemoryId, crate::model::EdgeType, MemoryId)>,
+    expanded: HashMap<MemoryId, Vec<MemoryId>>,
+}
+
+impl Neighbourhood<'_, '_> {
+    /// Whether `id` is a row of the namespace; adds it as a node (and donor)
+    /// the first time.
+    fn member(&mut self, id: MemoryId) -> Result<bool, StorageError> {
+        if let Some(&member) = self.members.get(&id) {
+            return Ok(member);
+        }
+        let row = match self.rows.get(id.as_bytes().as_slice())? {
+            Some(bytes) => Some(DiskRecord::from_bytes(bytes.value())?),
+            None => None,
+        };
+        let r = row.filter(|r| r.namespace_id == self.ns.id.get());
+        self.members.insert(id, r.is_some());
+        let Some(r) = r else {
+            return Ok(false);
+        };
+        self.graph
+            .add_node(id, self.ns.id, r.phase, r.strength, r.vector_slot)
             .map_err(|e| StorageError::InvalidControl(e.to_string()))?;
         let state = crate::storage::native_lifecycle::LifecycleState::capture(&r)?;
         if state.eligible() {
             let p = crate::decay::lifecycle::project(
                 r.stability,
                 state.lifecycle.decay_anchor_at,
-                policy,
-                now.max(state.lifecycle.lifecycle_updated_at),
+                self.policy,
+                self.now.max(state.lifecycle.lifecycle_updated_at),
                 0.,
             )
             .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
-            donors.insert(key, p.strength);
+            self.donors.insert(id, p.strength);
         }
+        Ok(true)
     }
-    for e in edges {
-        if ids.contains(&e.source) && ids.contains(&e.target) {
-            graph
-                .add_edge(e.source, e.target, e.edge_type, e.weight, e.auto_created)
-                .map_err(|e| StorageError::InvalidControl(e.to_string()))?;
+
+    fn contributes(&self, id: MemoryId) -> bool {
+        crate::graph::activation::fan_strength(self.s_max, self.graph.degree(&id)) > 0.
+    }
+
+    /// Adds the in-namespace edges of `id` and returns its neighbours. With
+    /// `saturate`, stops once its fan contributes nothing: then the
+    /// neighbours are partial, but the bonus never expands from `id`.
+    fn expand(&mut self, id: MemoryId, saturate: bool) -> Result<Vec<MemoryId>, StorageError> {
+        if let Some(neighbours) = self.expanded.get(&id) {
+            return Ok(neighbours.clone());
         }
+        let mut neighbours = Vec::new();
+        for e in EdgeStore::incident_edges(self.edge_snapshot, id)? {
+            if saturate && !self.contributes(id) {
+                break;
+            }
+            let other = if e.source == id { e.target } else { e.source };
+            if !self.member(other)? {
+                continue;
+            }
+            if self.added.insert((e.source, e.edge_type, e.target)) {
+                self.graph
+                    .add_edge(e.source, e.target, e.edge_type, e.weight, e.auto_created)
+                    .map_err(|e| StorageError::InvalidControl(e.to_string()))?;
+            }
+            neighbours.push(other);
+        }
+        neighbours.sort();
+        neighbours.dedup();
+        self.expanded.insert(id, neighbours.clone());
+        Ok(neighbours)
     }
-    Ok(crate::graph::activation::connection_bonus_with_strengths(
-        id,
-        &graph,
-        &Default::default(),
-        &donors,
-    ))
 }
 
 pub(super) fn validate_effect(e: &effects::PendingEffects) -> Result<(), StorageError> {
