@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
+
 ### Added
 
 - Change how fast memories decay in an existing namespace, `default` included (#237). The MCP tool `update_namespace_policy` and `recalld-cli namespaces policy NAME` take only the settings to change (multiplier, initial stability, phase thresholds, permastore threshold) and keep the rest; over HTTP, `PUT /namespaces/{id}/policy` now accepts contract 2, the only request that does. `namespace_stats` and `list_namespaces` report each namespace's `policy`, including the multiplier the sweep uses and `daysUntilSummary`/`daysUntilGhost` for a memory that is never recalled. Returning a namespace to the inherited multiplier now records the current `[decay]` value for it at once, instead of leaving operations blocked until an offline adoption.

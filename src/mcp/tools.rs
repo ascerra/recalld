@@ -35,6 +35,12 @@ const FULL_TEXT_DESC: &str = "Detailed content. Removed as memory decays to ghos
 // Registry and dispatch
 // ═══════════════════════════════════════════════════════════════════════
 
+/// Claude Code loads these tools upfront instead of behind tool search
+/// (<https://code.claude.com/docs/en/mcp#per-tool-alwaysload>).
+fn always_load() -> serde_json::Value {
+    json!({"anthropic/alwaysLoad": true})
+}
+
 /// Return all tool definitions for `tools/list`.
 pub fn tool_definitions() -> Vec<ToolInfo> {
     let mut tools = vec![
@@ -154,6 +160,7 @@ pub async fn dispatch_tool(
 fn get_session_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "get_session".into(),
         title: Some("Get Memory Session".into()),
         description: "Start here: inspect the resolved default namespace, whether it exists, \
@@ -194,6 +201,7 @@ async fn handle_get_session(bridge: &McpBridge, arguments: &serde_json::Value) -
 fn store_memory_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: Some(always_load()),
         name: "store_memory".to_string(),
         title: Some("Store Memory".to_string()),
         description: "Save a durable fact, preference, or decision with a generated embedding. \
@@ -319,6 +327,7 @@ async fn handle_store_memory(bridge: &McpBridge, arguments: serde_json::Value) -
 fn store_memories_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "store_memories".to_string(),
         title: Some("Store Memories (Batch)".to_string()),
         description: "Store up to 100 memories in order. Each item uses store_memory fields and its own \
@@ -673,6 +682,7 @@ async fn handle_store_memories(bridge: &McpBridge, arguments: serde_json::Value)
 fn recall_memories_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: Some(always_load()),
         name: "recall_memories".to_string(),
         title: Some("Recall Memories".to_string()),
         description: "Find relevant memories in one namespace using a natural-language query. \
@@ -855,6 +865,7 @@ async fn handle_recall_memories(
 fn get_memory_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "get_memory".to_string(),
         title: Some("Get Memory".to_string()),
         description: "Retrieve a specific memory by its ID. recordAccess defaults to true; use recordAccess:false for inspection without recording access."
@@ -925,6 +936,7 @@ async fn handle_get_memory(bridge: &McpBridge, arguments: serde_json::Value) -> 
 fn reinforce_memory_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "reinforce_memory".to_string(),
         title: Some("Reinforce Memory".to_string()),
         description: "Strengthen a memory that proved useful. Increases its \
@@ -1001,6 +1013,7 @@ async fn handle_reinforce_memory(
 fn forget_memory_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "forget_memory".to_string(),
         title: Some("Forget Memory".to_string()),
         // "Permanently delete" was wrong in both directions: the record
@@ -1072,6 +1085,7 @@ async fn handle_forget_memory(bridge: &McpBridge, arguments: serde_json::Value) 
 fn move_memories_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "move_memories".into(),
         title: Some("Move Memories".into()),
         description: "Atomically move 1–100 Full or Summary memories into an existing namespace, preserving their IDs, content, lifecycle/access history and graph edges. Ghost and Tombstone records are refused. Embeddings are regenerated from retained content using the exact destination provider/profile; dimension equality alone is insufficient. Cross-namespace edges remain stored, but scoped search stays scoped. Requires native storage, an explicit storeId and a stable idempotencyKey chosen before the first attempt. To reconcile an uncertain outcome, retain any operationId/receipt and repeat only the identical full ordered payload, both namespace names, embeddingMode, storeId and key. Never replace the key or retry a guessed subset. A replay reports the original move, not the records’ current location. Namespaces are not access controls.".into(),
@@ -1122,6 +1136,7 @@ pub(crate) async fn handle_move_memories(
 fn forget_memories_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "forget_memories".to_string(),
         title: Some("Forget Memories (Batch)".to_string()),
         description: "Delete several memories in a single call. Each moves to the \
@@ -1303,6 +1318,7 @@ async fn handle_forget_memories(
 fn find_similar_memories_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "find_similar_memories".to_string(),
         title: Some("Find Similar Memories".to_string()),
         description: "Find memories semantically similar to a specific existing \
@@ -1525,6 +1541,7 @@ async fn handle_find_similar_scan(
 fn create_namespace_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "create_namespace".to_string(),
         title: Some("Create Namespace".to_string()),
         description: "Create a namespace for project-specific context or a reusable general topic. \
@@ -1657,6 +1674,7 @@ pub(crate) async fn handle_create_namespace_bounded(
 fn delete_namespace_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "delete_namespace".to_string(),
         title: Some("Delete Namespace".to_string()),
         description: "Destroy a namespace and everything in it: every memory, every \
@@ -1774,6 +1792,7 @@ async fn handle_delete_namespace(
 fn namespace_stats_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "namespace_stats".to_string(),
         title: Some("Namespace Stats".to_string()),
         description: "Get statistics for a memory namespace: live memory count, \
@@ -1937,6 +1956,7 @@ async fn handle_update_namespace_policy(
 fn list_memories_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "list_memories".to_string(),
         title: Some("List Memories".to_string()),
         description: "List all memories in a namespace with pagination and optional \
@@ -2036,6 +2056,7 @@ async fn handle_list_memories(bridge: &McpBridge, arguments: serde_json::Value) 
 fn list_namespaces_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "list_namespaces".to_string(),
         title: Some("List Namespaces".to_string()),
         description: "List every memory namespace with its ID, embedding dimensions, live \
@@ -2080,6 +2101,7 @@ async fn handle_list_namespaces(
 fn list_tags_def() -> ToolInfo {
     ToolInfo {
         output_schema: None,
+        meta: None,
         name: "list_tags".to_string(),
         title: Some("List Tags".to_string()),
         description: "List the tag vocabulary with per-label memory counts, most common \
@@ -2836,6 +2858,18 @@ mod tests {
     #[test]
     fn t35_declares_seventeen_tools() {
         assert_eq!(tool_definitions().len(), 17);
+    }
+
+    #[test]
+    fn only_recall_and_store_memory_are_always_loaded() {
+        for tool in tool_definitions() {
+            let json = serde_json::to_value(&tool).unwrap();
+            if matches!(tool.name.as_str(), "recall_memories" | "store_memory") {
+                assert_eq!(json["_meta"], json!({"anthropic/alwaysLoad": true}));
+            } else {
+                assert!(json.get("_meta").is_none(), "{} has _meta", tool.name);
+            }
+        }
     }
 
     /// A bridge whose every method fails. The point is to reach

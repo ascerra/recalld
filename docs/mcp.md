@@ -251,6 +251,8 @@ Namespace options accept finite numbers: `initialStability` must remain positive
 
 Tool annotations reflect defaults: recall, get, and single-memory similarity record access unless `recordAccess:false` is supplied. They are not read-only under their default settings. Reinforcement changes memory strength and is not idempotent. Stores can supersede memories and may call the configured embedding provider, as can recall. Inspect durable batch receipts separately; annotations do not promise exactly-once execution for arbitrary repeated calls.
 
+`recall_memories` and `store_memory` set `_meta: {"anthropic/alwaysLoad": true}` in `tools/list`, so Claude Code [loads them upfront](https://code.claude.com/docs/en/mcp#per-tool-alwaysload) instead of behind tool search. Other clients ignore it.
+
 Example messages:
 
 | Situation | Error |
