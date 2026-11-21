@@ -3,7 +3,7 @@ use super::protocol::{ContentBlock, ToolCallResult};
 use serde_json::Value;
 
 const MARKER: &str = "Recovery guidance: ";
-pub(super) const REFRESH: &str = "Restart the MCP server process using the updated recalld binary, then reconnect the client and refresh its tool list. Reconnecting to an old process is not sufficient. This does not require enabling contract version 2.";
+pub(super) const REFRESH: &str = "Restart the MCP server process using the updated recalld binary, then reconnect the client and refresh its tool list. Reconnecting to an old process is not sufficient.";
 const RECONCILE: &str = "Preserve the original request and any returned operation ID or receipt. Inspect the affected IDs with recordAccess:false in the same explicitly selected namespace and reconcile the outcome before retrying. If no record ID was returned, inspect list_memories in that namespace; similarity alone cannot confirm a write. If the outcome remains uncertain, stop and report it. Do not blindly replay the mutation or invent a new retry key.";
 const BATCH: &str = "For the existing receipt-aware batch retry, preserve the exact full ordered payload, default namespace and storeId; reuse the same idempotencyKey or batchOperationId. Inspect each item and retained receipt. Do not replace the original identity with a fresh key or replay only a guessed subset.";
 
@@ -233,6 +233,6 @@ mod tests {
         );
         append_recovery_guidance("store_memory", &json!({}), &mut r);
         assert!(rendered(&r).contains("refresh its tool list"));
-        assert!(rendered(&r).contains("does not require enabling contract version 2"));
+        assert!(!rendered(&r).contains("contract version"));
     }
 }

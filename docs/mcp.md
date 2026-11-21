@@ -1539,9 +1539,10 @@ If you find memories disappearing too quickly or persisting too long, adjust `de
 
 ## Application contract selection
 
-Tools currently support application contract version 1. Omit `contractVersion`
-or supply the integer `1`; explicit `2` and malformed selectors fail before
-handler work. This is separate from MCP transport protocol negotiation. Legacy
+Tool schemas do not list a contract version; every tool uses application
+contract 1. Older clients may still send `contractVersion: 1` (or
+`batchResultVersion: 1` on batch tools) and keep working; `2` and malformed
+selectors fail before handler work. This is separate from MCP transport protocol negotiation. Legacy
 success payloads remain unchanged, including unknown-field compatibility and
 missing arguments on no-argument tools. Modern object results also carry the
 same JSON in `structuredContent`; legacy-era results and array/scalar payloads

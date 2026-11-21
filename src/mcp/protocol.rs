@@ -103,7 +103,7 @@ pub const SERVER_INSTRUCTIONS: &str = "At task start, recall relevant context fr
     Omitted namespace means the session default (get_session, recalld://session); by-ID operations use record scope. \
     Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
     Similarity is advisory: never auto-delete matches. Check every batch item. \
-    Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, namespace, storeId and original key/reservation. \
+    Single writes have no retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, namespace, storeId and original key/reservation. \
     After upgrades, restart the MCP process and refresh tools; working reads don't prove write compatibility. \
     Forget doesn't erase backups; dimensions don't prove model identity.";
 
@@ -113,7 +113,7 @@ pub const SINGLE_NAMESPACE_INSTRUCTIONS: &str = "At task start, recall relevant 
     Single-namespace mode: every memory is in default (see get_session, recalld://session). Do not pass namespace; other namespaces cannot be created or reached. \
     By-ID operations use record scope. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
     Similarity is advisory: never auto-delete matches. Check every batch item. \
-    Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, storeId and original key/reservation. \
+    Single writes have no retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, storeId and original key/reservation. \
     After upgrades, restart the MCP process and refresh tools; working reads don't prove write compatibility. \
     Forget doesn't erase backups; dimensions don't prove model identity.";
 
