@@ -499,6 +499,8 @@ impl RedbStorageEngine {
         mode: OpenMode,
         ids: Box<dyn super::ids::IdSource>,
     ) -> Result<Self, StorageError> {
+        // Preflight copy, metadata open and recovery share one decode of each receipt.
+        let _receipts = crate::storage::control::ReceiptMemo::enter();
         let db_path = ownership.path.clone();
         std::fs::create_dir_all(&db_path)?;
         let lock_file = crate::storage::ownership::lock_directory(&db_path)?;
@@ -533,7 +535,9 @@ impl RedbStorageEngine {
         }
 
         // Step 2: Open meta.db.
-        let meta_store = MetadataStore::open_with_ids(&db_path.join("meta.db"), native, ids)?;
+        let preflighted = native && existing;
+        let (meta_store, opened_text) =
+            MetadataStore::open_with_ids(&db_path.join("meta.db"), native, ids, preflighted)?;
 
         // Step 3: Open edges.db.
         let edge_store = EdgeStore::open(&db_path.join("edges.db"))?;
@@ -559,7 +563,12 @@ impl RedbStorageEngine {
                 )?;
             }
         }
-        let selected_text = meta_store.text_selection_for_recovery()?;
+        // Existing native entry has not written metadata since its validated open.
+        let selected_text = if preflighted {
+            opened_text
+        } else {
+            meta_store.text_selection_for_recovery()?
+        };
         let text_store = match &selected_text {
             Some(selected) => TextStore::open_generation(&db_path, selected, true)?,
             None => TextStore::open(&db_path.join("fulltext.dat"))?,
