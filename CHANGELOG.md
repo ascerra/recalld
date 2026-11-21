@@ -27,8 +27,9 @@
 
 ### Changed
 
-- Memory is used silently: recalld's instructions and the documented prompt and hook templates tell agents not to report memory stores, recalls or status to the user, and to mention remembered facts only when they matter to the answer.
 - MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
+- MCP tools no longer advertise `contractVersion`, and `store_memories`/`forget_memories` no longer advertise `batchResultVersion`; the server instructions and recovery hints drop their contract-version wording. Only version 1 exists for agents, so the labels only caused confusion. Older clients may still send `contractVersion: 1` or `batchResultVersion: 1`, and other values are refused as before. HTTP contract selection is unchanged.
+- Memory is used silently: recalld's instructions and the documented prompt and hook templates tell agents not to report memory stores, recalls or status to the user, and to mention remembered facts only when they matter to the answer.
 
 ## 2.1.2 — 2026-11-20
 

@@ -63,11 +63,9 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         list_tags_def(),
     ];
     for tool in &mut tools {
+        // contractVersion and batchResultVersion are still accepted (1 only)
+        // but not advertised: one version means the label only confuses agents.
         tool.output_schema = super::tool_schema::output(&tool.name);
-        tool.input_schema["properties"]["contractVersion"] = json!({
-            "type": "integer", "enum": [1], "default": 1,
-            "description": "Application contract version. This server currently supports version 1 only."
-        });
     }
     tools
 }
@@ -164,7 +162,7 @@ fn get_session_def() -> ToolInfo {
         name: "get_session".into(),
         title: Some("Get Memory Session".into()),
         description: "Start here: inspect the resolved default namespace, whether it exists, \
-            supported application contract, and access-recording defaults. Read-only; creates \
+            and access-recording defaults. Read-only; creates \
             nothing. Same context as recalld://session. An omitted namespace uses this session \
             default; pass namespace explicitly to choose shared, project, or topic context. \
             Backend context is configuration information, not a readiness or model-provenance guarantee."
@@ -183,7 +181,7 @@ async fn handle_get_session(bridge: &McpBridge, arguments: &serde_json::Value) -
         .is_some_and(|fields| fields.keys().any(|key| key != "contractVersion"))
     {
         return ToolCallResult::error(
-            "get_session accepts only contractVersion. It reports the active session; pass namespace to store or recall tools to select another scope.",
+            "get_session takes no arguments. It reports the active session; pass namespace to store or recall tools to select another scope.",
         );
     }
     match super::resources::session_document(bridge).await {
@@ -406,8 +404,7 @@ fn store_memories_def() -> ToolInfo {
                 },
                 "storeId": {"type":"string","format":"uuid","description":"Store identity for a durable batch retry; retain the storeId from the session backend context or original result."},
                 "batchOperationId": {"type":"string","format":"uuid","description":"Resume the original returned reservation with its storeId and identical ordered payload/namespace. Use instead of idempotencyKey, never both; do not invent this ID."},
-                "idempotencyKey": {"type":"string","description":"Choose once before the initial batch and retain with storeId. Retry the identical ordered payload and session namespace with the same key. Finalized errors replay unchanged; do not replace the key to resolve an unknown outcome."},
-                "batchResultVersion": {"type":"integer","enum":[1],"description":"Additive batch envelope version, not lifecycle/API v2 or whole-store CAS."}
+                "idempotencyKey": {"type":"string","description":"Choose once before the initial batch and retain with storeId. Retry the identical ordered payload and session namespace with the same key. Finalized errors replay unchanged; do not replace the key to resolve an unknown outcome."}
             },
             "required": ["memories"]
         }),
@@ -1159,8 +1156,7 @@ fn forget_memories_def() -> ToolInfo {
                 },
                 "storeId": {"type":"string","format":"uuid","description":"Store identity for a durable batch retry; retain the storeId from the session backend context or original result."},
                 "batchOperationId": {"type":"string","format":"uuid","description":"Resume the original returned reservation with its storeId and identical ordered payload/namespace. Use instead of idempotencyKey, never both; do not invent this ID."},
-                "idempotencyKey": {"type":"string","description":"Resume the same full ordered ID array. A new key is required to retry finalized failures."},
-                "batchResultVersion": {"type":"integer","enum":[1]}
+                "idempotencyKey": {"type":"string","description":"Resume the same full ordered ID array. A new key is required to retry finalized failures."}
             },
             "required": ["ids"]
         }),
@@ -2782,10 +2778,7 @@ mod tests {
             definition.input_schema["properties"]["ids"]["maxItems"],
             100
         );
-        assert_eq!(
-            definition.input_schema["properties"]["contractVersion"]["enum"],
-            json!([1])
-        );
+        assert!(definition.input_schema["properties"]["contractVersion"].is_null());
         let output = definition.output_schema.unwrap();
         let receipt = &output["properties"]["receipt"]["anyOf"][1]["properties"];
         for field in [
