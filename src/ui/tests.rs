@@ -356,20 +356,34 @@ async fn subscribe_streams_store_events_with_agent() {
         serde_json::from_slice(&read_frame(&mut r, MAX_MESSAGE_SIZE).await.unwrap()).unwrap();
     assert_eq!(reply["result"]["subscribed"], json!(["store"]));
 
+    // The event bus is process-wide, so parallel tests' stores reach this
+    // subscription too. Drain it from the start: a reader that waits until
+    // the store returns lets the socket fill, and the bus then drops events
+    // (ours included) as lagged.
+    let (tx, mut frames) = tokio::sync::mpsc::unbounded_channel();
+    let reader = tokio::spawn(async move {
+        while let Ok(frame) = read_frame(&mut r, MAX_MESSAGE_SIZE).await {
+            if tx.send(frame).is_err() {
+                break;
+            }
+        }
+    });
+
     let c = d.agent("test-agent").await;
     let id = d.store(&c, "Epsilon").await;
 
-    let event = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        loop {
-            let frame = read_frame(&mut r, MAX_MESSAGE_SIZE).await.unwrap();
+    let event = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while let Some(frame) = frames.recv().await {
             let message: Value = serde_json::from_slice(&frame).unwrap();
             if message["method"] == "event" && message["params"]["id"] == id.as_str() {
                 return message["params"].clone();
             }
         }
+        panic!("subscription closed before the store event");
     })
     .await
-    .expect("store event within 5s");
+    .expect("store event within 30s");
+    reader.abort();
     assert_eq!(event["kind"], "store");
     assert_eq!(event["agent"], "test-agent");
     assert_eq!(event["phase"], 1);
