@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 — 2026-11-20
+
+### Changed
+
+- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
+- New namespaces, including `default` on a new store, use the explicit-feedback lifecycle: a recall records that it returned a memory but no longer restarts its decay clock, and only `reinforce_memory` makes a memory last longer. A memory that keeps being recalled but is never reinforced now fades instead of staying at full strength. Existing namespaces keep their lifecycle until migrated with `recalld lifecycle migrate`. The `reinforce_memory` description now says that it, not recall, strengthens a memory.
+- MCP tools no longer advertise `contractVersion`, and `store_memories`/`forget_memories` no longer advertise `batchResultVersion`; the server instructions and recovery hints drop their contract-version wording. Only version 1 exists for agents, so the labels only caused confusion. Older clients may still send `contractVersion: 1` or `batchResultVersion: 1`, and other values are refused as before. HTTP contract selection is unchanged.
+- Memory is used silently: recalld's instructions and the documented prompt and hook templates tell agents not to report memory stores, recalls or status to the user, and to mention remembered facts only when they matter to the answer.
 
 ### Added
 
@@ -33,12 +40,13 @@
 
 - `[decay.phase_thresholds]` and `decay.permastore_threshold_days` (and `RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`, `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS`) never had an effect: thresholds are set per namespace. They are still accepted, startup logs a `WARN` when they differ from the defaults, and they are gone from the sample config and the guide. (#233)
 
-### Changed
+### Upgrade notes
 
-- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
-- New namespaces, including `default` on a new store, use the explicit-feedback lifecycle: a recall records that it returned a memory but no longer restarts its decay clock, and only `reinforce_memory` makes a memory last longer. A memory that keeps being recalled but is never reinforced now fades instead of staying at full strength. Existing namespaces keep their lifecycle until migrated with `recalld lifecycle migrate`. The `reinforce_memory` description now says that it, not recall, strengthens a memory.
-- MCP tools no longer advertise `contractVersion`, and `store_memories`/`forget_memories` no longer advertise `batchResultVersion`; the server instructions and recovery hints drop their contract-version wording. Only version 1 exists for agents, so the labels only caused confusion. Older clients may still send `contractVersion: 1` or `batchResultVersion: 1`, and other values are refused as before. HTTP contract selection is unchanged.
-- Memory is used silently: recalld's instructions and the documented prompt and hook templates tell agents not to report memory stores, recalls or status to the user, and to mention remembered facts only when they matter to the answer.
+- **Lifecycle:** existing namespaces keep the legacy lifecycle until you migrate them. To move them to explicit feedback, stop the daemon and close agent sessions (they restart it), then run `recalld lifecycle preview --all` and `recalld lifecycle migrate --all --destination <new-dir>`, and swap the directories as printed. Expect the first sweeps afterwards to move more long-unused memories to Summary and Ghost; that is the intended effect. Keep the old directory until you are satisfied; moving it back undoes the change.
+- **Downgrades:** once 2.2.0 creates a namespace (including `default` on a new store) or clears a namespace's explicit decay multiplier, the store holds receipts that 2.1.x and earlier refuse to open. Restore a pre-upgrade backup to go back.
+- **Decay multiplier:** a changed `decay_rate_multiplier` is adopted at daemon start for namespaces that inherit it, with a warning listing how many memories the next sweep will move. Check the daemon log after changing it.
+- **Deprecated settings:** remove `[decay.phase_thresholds]` and `decay.permastore_threshold_days` from your config; they never had an effect and now log a warning. Use `recalld-cli namespaces policy` or `update_namespace_policy` per namespace instead.
+- **Clients:** restart MCP clients after upgrading so they pick up the new tool list (`update_namespace_policy`) and instructions.
 
 ## 2.1.2 — 2026-11-20
 
