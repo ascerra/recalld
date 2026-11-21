@@ -248,6 +248,24 @@ async fn cmd_namespaces(
             let stats = client.namespace_stats(stats_args.name.as_deref()).await?;
             print_out(&fmt.namespace_stats(&stats));
         }
+        NamespaceAction::Policy(policy_args) => {
+            let (id, before) = client.namespace_policy(&policy_args.name).await?;
+            let current: crate::serialization::policy::PolicyValues =
+                serde_json::from_value(before.clone())?;
+            let policy = current
+                .merge(&policy_args.patch())
+                .map_err(|e| CliError::Other(e.to_string()))?;
+            let reply = client.replace_namespace_policy(id, &policy).await?;
+            let (_, after) = client.namespace_policy(&policy_args.name).await?;
+            let out = serde_json::json!({
+                "namespace": policy_args.name,
+                "changed": reply["data"]["changed"],
+                "before": before,
+                "after": after,
+                "operationId": reply["receipt"]["operationId"],
+            });
+            print_out(&format!("{}\n", serde_json::to_string_pretty(&out)?));
+        }
     }
     Ok(())
 }

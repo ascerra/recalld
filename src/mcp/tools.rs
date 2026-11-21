@@ -1,9 +1,9 @@
 //! MCP tool definitions and handlers for Recalld memory operations.
 //!
-//! Defines 16 tools: get_session, store_memory, store_memories, recall_memories, get_memory,
+//! Defines 17 tools: get_session, store_memory, store_memories, recall_memories, get_memory,
 //! reinforce_memory, forget_memory, forget_memories, find_similar_memories,
-//! create_namespace, delete_namespace, namespace_stats, list_memories,
-//! list_namespaces, list_tags, move_memories.
+//! create_namespace, delete_namespace, namespace_stats, update_namespace_policy,
+//! list_memories, list_namespaces, list_tags, move_memories.
 
 use serde_json::json;
 
@@ -57,6 +57,7 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
         create_namespace_def(),
         delete_namespace_def(),
         namespace_stats_def(),
+        update_namespace_policy_def(),
         list_memories_def(),
         list_namespaces_def(),
         list_tags_def(),
@@ -77,7 +78,7 @@ pub fn tool_definitions() -> Vec<ToolInfo> {
 /// which advertises a tool that then answers "Unknown tool" — fails a
 /// test rather than a caller.
 #[cfg(test)]
-const DISPATCHED: [&str; 16] = [
+const DISPATCHED: [&str; 17] = [
     "get_session",
     "store_memory",
     "store_memories",
@@ -91,6 +92,7 @@ const DISPATCHED: [&str; 16] = [
     "create_namespace",
     "delete_namespace",
     "namespace_stats",
+    "update_namespace_policy",
     "list_memories",
     "list_namespaces",
     "list_tags",
@@ -146,6 +148,7 @@ pub async fn dispatch_tool(
         "create_namespace" => handle_create_namespace(bridge, arguments).await,
         "delete_namespace" => handle_delete_namespace(bridge, arguments).await,
         "namespace_stats" => handle_namespace_stats(bridge, arguments).await,
+        "update_namespace_policy" => handle_update_namespace_policy(bridge, arguments).await,
         "list_memories" => handle_list_memories(bridge, arguments).await,
         "list_namespaces" => handle_list_namespaces(bridge, arguments).await,
         "list_tags" => handle_list_tags(bridge, arguments).await,
@@ -1848,6 +1851,105 @@ async fn handle_namespace_stats(
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+// Tool: update_namespace_policy
+// ═══════════════════════════════════════════════════════════════════════
+
+fn update_namespace_policy_def() -> ToolInfo {
+    let unit = json!({"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1});
+    ToolInfo {
+        output_schema: None,
+        name: "update_namespace_policy".to_string(),
+        title: Some("Update Namespace Policy".to_string()),
+        description: "Change how fast memories decay in an existing namespace, `default` \
+            included. Give only the fields to change; the rest keep their current values. \
+            Takes effect for every memory in the namespace at the next sweep or recall. \
+            namespace_stats and list_namespaces show the current `policy`, including \
+            `daysUntilSummary` and `daysUntilGhost` for a memory that is never recalled. \
+            decayRateMultiplier scales time: 2 makes memories last twice as long, 0 stops \
+            decay, null returns the namespace to the `[decay]` setting. A memory drops to \
+            Summary when its retrievability falls below phaseThresholds.fullToSummary and \
+            to Ghost below summaryToGhost. The reply is a contract envelope: `data.policy` \
+            is the new policy, `data.changed` says whether anything changed, and `receipt` \
+            records the change (its `outcome.before`/`after` hold both policies)."
+            .to_string(),
+        input_schema: json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "namespace": {
+                    "type": ["string", "null"],
+                    "description": "Namespace to change (omitted or null: configured session default, then \"default\")"
+                },
+                "decayRateMultiplier": {
+                    "type": ["number", "null"],
+                    "minimum": 0,
+                    "description": "Time scale for decay: 1 normal, 2 twice as slow, 0 no decay. Null inherits the [decay] multiplier."
+                },
+                "initialStability": {
+                    "type": "number", "exclusiveMinimum": 0,
+                    "description": "Stability, in days, a new memory starts with (built-in 3.7145)."
+                },
+                "phaseThresholds": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "description": "Any of the three retrievability thresholds. After the change they must satisfy 0 < ghostToDelete < summaryToGhost < fullToSummary < 1.",
+                    "properties": {
+                        "fullToSummary": unit, "summaryToGhost": unit, "ghostToDelete": unit
+                    }
+                },
+                "permastoreThreshold": {
+                    "type": "number", "exclusiveMinimum": 0,
+                    "description": "Stability, in days, at which a memory becomes permanent (built-in 1500)."
+                },
+                "desiredRetention": {
+                    "type": "number", "minimum": 0, "maximum": 1,
+                    "description": "Target retention for FSRS scheduling (built-in 0.9)."
+                },
+                "defaultDifficulty": {
+                    "type": "number", "minimum": 1, "maximum": 10,
+                    "description": "FSRS difficulty a new memory starts with (built-in 5)."
+                }
+            }
+        }),
+        annotations: Some(ToolAnnotations {
+            read_only_hint: Some(false),
+            destructive_hint: Some(false),
+            idempotent_hint: Some(true),
+            open_world_hint: Some(false),
+        }),
+    }
+}
+
+async fn handle_update_namespace_policy(
+    bridge: &McpBridge,
+    arguments: serde_json::Value,
+) -> ToolCallResult {
+    let namespace = match args::namespace_or(&arguments, bridge.default_namespace()) {
+        Ok(ns) => ns,
+        Err(e) => return ToolCallResult::error(e.to_string()),
+    };
+    let mut patch = arguments.as_object().cloned().unwrap_or_default();
+    patch.remove("namespace");
+    patch.remove("contractVersion");
+    match bridge
+        .namespaces
+        .update_namespace_policy(&namespace, patch)
+        .await
+    {
+        Ok((status, envelope)) => {
+            let mut result = ToolCallResult::json(&envelope)
+                .unwrap_or_else(|_| ToolCallResult::error("Serialization error"));
+            if status >= 400 {
+                result.is_error = Some(true);
+            }
+            result
+        }
+        Err(e) => ToolCallResult::error(format!("Failed to update namespace policy: {e}")),
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 // Tool 10: list_memories
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -2754,8 +2856,8 @@ mod tests {
     }
 
     #[test]
-    fn t35_declares_sixteen_tools() {
-        assert_eq!(tool_definitions().len(), 16);
+    fn t35_declares_seventeen_tools() {
+        assert_eq!(tool_definitions().len(), 17);
     }
 
     #[test]

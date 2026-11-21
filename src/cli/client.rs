@@ -265,6 +265,39 @@ impl RecalldClient {
         .await
     }
 
+    /// GET /namespaces/:name/stats — the namespace's id and decay policy.
+    pub async fn namespace_policy(
+        &self,
+        name: &str,
+    ) -> crate::cli::Result<(u32, serde_json::Value)> {
+        let body: serde_json::Value = self.get(&format!("/namespaces/{name}/stats")).await?;
+        let data = &body["data"];
+        let id = data["id"].as_u64().and_then(|id| u32::try_from(id).ok());
+        match (id, data.get("policy")) {
+            (Some(id), Some(policy)) => Ok((id, policy.clone())),
+            _ => Err(crate::cli::CliError::Other(
+                "the server does not report namespace policy; upgrade recalld".into(),
+            )),
+        }
+    }
+
+    /// PUT /namespaces/:id/policy — complete numeric policy replacement
+    /// (contract 2). Returns the contract envelope.
+    pub async fn replace_namespace_policy(
+        &self,
+        id: u32,
+        policy: &serde_json::Value,
+    ) -> crate::cli::Result<serde_json::Value> {
+        let resp = self
+            .client
+            .put(self.url(&format!("/namespaces/{id}/policy")))
+            .header(crate::serialization::contract::VERSION_HEADER, "2")
+            .json(&serde_json::json!({ "policy": policy }))
+            .send()
+            .await?;
+        self.handle_response(resp).await
+    }
+
     /// GET /v1/namespaces/:name/stats — namespace statistics.
     pub async fn namespace_stats(
         &self,

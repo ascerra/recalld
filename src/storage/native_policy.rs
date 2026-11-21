@@ -63,6 +63,14 @@ pub struct NativeNamespacePolicyUpdated {
         deserialize_with = "super::request_context::deserialize_present"
     )]
     pub cleared_inherited_decay: Option<super::inherited_policy::InheritedDecayBinding>,
+    /// Returning to inheritance binds the owner's current inherited multiplier
+    /// in this same receipt, so dependent operations need no separate adoption.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub adopted_inherited_decay: Option<super::inherited_policy::InheritedDecayBinding>,
     pub record_count: u64,
     pub record_token_digest: String,
 }
@@ -114,6 +122,17 @@ impl NativeNamespacePolicyUpdated {
                 || self.after.decay_rate_multiplier.is_some()
             {
                 return Err(invalid("invalid inherited binding clearance"));
+            }
+        }
+        if let Some(binding) = &self.adopted_inherited_decay {
+            binding.validate()?;
+            if self.before.decay_rate_multiplier.is_none()
+                || self.after.decay_rate_multiplier.is_some()
+                || !binding.matches_receipt(receipt)
+            {
+                return Err(invalid(
+                    "invalid inherited binding on return to inheritance",
+                ));
             }
         }
         for state in [&self.before, &self.after] {

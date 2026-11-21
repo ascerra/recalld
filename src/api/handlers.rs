@@ -1744,6 +1744,10 @@ pub async fn namespace_stats(
         })?;
 
         let stats = state.storage.namespace_stats(ns.id).await?;
+        let policy = state
+            .namespaces
+            .policy_inputs()
+            .and_then(|inputs| crate::mcp::bridge::NamespacePolicyView::resolve(&ns, &inputs));
 
         let response = NamespaceStatsResponse {
             name: ns.name,
@@ -1760,6 +1764,7 @@ pub async fn namespace_stats(
             edge_count: stats.edge_count,
             embedding_dim: ns.embedding_dim,
             vector_bytes: stats.memory_count * ns.embedding_dim as u64 * 4,
+            policy,
         };
 
         let took = start.elapsed().as_micros() as u64;
@@ -2960,7 +2965,8 @@ pub(crate) async fn catalog_v2(
         .into_response()
 }
 
-/// Contract2-only numeric policy replacement; existing application gate remains.
+/// Contract2-only numeric policy replacement, the one contract-2 operation the
+/// middleware admits (#237).
 pub async fn update_namespace_policy(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -2978,13 +2984,6 @@ pub async fn update_namespace_policy(
             .into_response();
         }
     };
-    if let Err(error) = version.require_supported() {
-        return AppError::BadRequest {
-            message: error.to_string(),
-            field: Some("contractVersion".into()),
-        }
-        .into_response();
-    }
     if version != ContractVersion::V2 {
         return AppError::BadRequest {
             message: "numeric policy replacement requires contractVersion 2".into(),

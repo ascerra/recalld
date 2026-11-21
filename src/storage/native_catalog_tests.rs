@@ -318,7 +318,13 @@ async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
     assert_eq!(inherited.multiplier_bits, 1f32.to_bits());
     assert_eq!(transition.inherited_decay.as_ref(), Some(inherited));
     assert!(crate::storage::inherited_policy::resolve_bound(&ns, &Default::default(), 1.).is_ok());
-    assert!(crate::storage::inherited_policy::resolve_bound(&ns, &Default::default(), 0.).is_err());
+    // An unadopted configured change resolves to the adopted value.
+    assert_eq!(
+        crate::storage::inherited_policy::resolve_bound(&ns, &Default::default(), 0.)
+            .unwrap()
+            .decay_rate_multiplier,
+        1.
+    );
     assert_eq!(
         ns.schema.as_ref().unwrap().lifecycle_version,
         crate::model::schema::LifecycleVersion::LegacyAccessV1

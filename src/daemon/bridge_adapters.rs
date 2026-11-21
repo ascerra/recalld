@@ -609,6 +609,28 @@ impl bridge::NamespaceRegistry for RemoteNamespaceAdapter {
             .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))
     }
 
+    async fn update_namespace_policy(
+        &self,
+        namespace: &str,
+        patch: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(u16, serde_json::Value), BridgeError> {
+        #[derive(serde::Deserialize)]
+        struct Reply {
+            status: u16,
+            envelope: serde_json::Value,
+        }
+        let result = self
+            .client
+            .call(
+                "update_namespace_policy",
+                serde_json::json!({"namespace": namespace, "patch": patch}),
+            )
+            .await?;
+        let reply: Reply = serde_json::from_value(result)
+            .map_err(|e| BridgeError::Internal(format!("response decode: {e}")))?;
+        Ok((reply.status, reply.envelope))
+    }
+
     async fn namespace_stats(&self, name: &str) -> Result<NamespaceStats, BridgeError> {
         let params = serde_json::to_value(protocol::NamespaceStatsParams {
             name: name.to_string(),
