@@ -2,23 +2,31 @@
 
 ## Unreleased
 
+### Changed
+
+- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
+
 ### Added
 
+- Change how fast memories decay in an existing namespace, `default` included (#237). The MCP tool `update_namespace_policy` and `recalld-cli namespaces policy NAME` take only the settings to change (multiplier, initial stability, phase thresholds, permastore threshold) and keep the rest; over HTTP, `PUT /namespaces/{id}/policy` now accepts contract 2, the only request that does. `namespace_stats` and `list_namespaces` report each namespace's `policy`, including the multiplier the sweep uses and `daysUntilSummary`/`daysUntilGhost` for a memory that is never recalled. Returning a namespace to the inherited multiplier now records the current `[decay]` value for it at once, instead of leaving operations blocked until an offline adoption.
 - Single-namespace mode for MCP: `[namespaces] mode = "single"` (or `RECALLD_NAMESPACES_MODE=single`) keeps every agent's memories in `default`. Agents are not told to choose or create namespaces, `create_namespace`, `delete_namespace` and `move_memories` are hidden, and a namespace other than `default` is rejected. The default, `"multi"`, is unchanged; the HTTP API and CLI are unaffected.
 
 ### Local web UI
 
 - Decay forecasts use the namespace's effective decay multiplier (its own, else the global one), as the decay sweep does: Explore's strength and **Next change**, the memory panel's decay curve, the Health forecast and at-risk list, and the map's Decay scrubber previously assumed a multiplier of 1. (#235)
+- The namespace menu in search (⌘K) opens above the search popup instead of behind it. Search starts from the page's namespace (All when none is set) and changing it there filters only the search, not every page.
 
 ### Fixed
 
+- Changing `decay_rate_multiplier` no longer makes `recall_memories`, `store_memory`, `reinforce_memory` and `get_memory` fail, or skips every decay sweep, on a store created by 2.x. Startup now adopts the new value for each namespace that inherits it, with a receipt, and logs a `WARN` per namespace with the old and new value and how many memories move to Summary or Ghost or are deleted at the next sweep. If a namespace cannot be adopted (for example, it has more than 100,000 memories, the preview limit), startup continues, the namespace keeps its previous value, and a `WARN` says the change is not yet applied. A sweep that cannot resolve one namespace's policy now skips that namespace with a `WARN` instead of stopping the pass for all of them. (#232)
 - `get_memory` and the web UI's memory view now return memories that older releases left in the Summary phase with their full text, or in the Ghost phase with tags, instead of failing with "Prepared remote response is unavailable" after an upgrade. The record is returned as stored. When a daemon reply is still rejected, the error message and the MCP or UI process log name the failed check. (#231)
+- Recall collapses a whole `supersedes` chain to its newest version that the query may return. When the newest version could not be returned (deleted, a ghost the query did not ask for, or excluded by a filter), every older version came back instead, often side by side; now the next newest takes its place. A superseded memory is still available by ID.
 - docs/architecture.md gave the default decay timeline as about 36 days to Summary and 280 to Ghost; the formula gives about 16.5 and 160 (and about 6,300 days to removal, not 13,300). (#234)
 - A decay sweep wrote every memory on every pass, because strength changes a little each time, and each write keeps a receipt in `meta.db` for the life of the store: about 5 MB and 5 s of daemon start time per sweep on a 1,200-memory store. A sweep now writes a memory only when it changes phase or is removed. Strength is computed when it is read: recall and its `minStrength` filter, `get_memory`, `namespace_stats` and the HTTP API report the strength at the time of the request, as namespaces migrated to explicit feedback already did, instead of the value stored at the last write (while the relationship graph is being rebuilt, `get_memory` on a namespace that hasn't been migrated to explicit feedback leaves out the connection bonus instead of failing). Phase changes still happen on time, since the sweep decides them from computed strength. Part of #239.
 
-### Local web UI
+### Deprecated
 
-- The namespace menu in search (⌘K) opens above the search popup instead of behind it. Search starts from the page's namespace (All when none is set) and changing it there filters only the search, not every page.
+- `[decay.phase_thresholds]` and `decay.permastore_threshold_days` (and `RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`, `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS`) never had an effect: thresholds are set per namespace. They are still accepted, startup logs a `WARN` when they differ from the defaults, and they are gone from the sample config and the guide. (#233)
 
 ## 2.1.2 — 2026-11-20
 

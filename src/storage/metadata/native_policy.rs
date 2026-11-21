@@ -67,8 +67,6 @@ impl MetadataStore {
         } else {
             None
         };
-        // Numeric replacement can leave inheritance unadopted. It cannot perform
-        // dependent projection; only explicit preview/adoption establishes it.
         crate::storage::inherited_policy::supported_inputs(&policy.global)?;
         crate::decay::lifecycle::resolve_policy(&namespace, &policy.global, policy.multiplier)
             .map_err(|e| StorageError::InvalidMutation(e.to_string()))?;
@@ -95,6 +93,27 @@ impl MetadataStore {
             self.commit_catalog(tx, &receipt)?;
             return Ok(Some(receipt));
         }
+        // Returning to inheritance binds the owner's current multiplier with
+        // this receipt, so dependent operations keep working without a
+        // separate offline adoption (#237). Rows are not projected here.
+        let operation_id = self
+            .id_source()
+            .uuid(crate::storage::ids::IdKind::Operation)?;
+        let adopted_inherited_decay = if returns_to_inheritance {
+            let binding = crate::storage::inherited_policy::InheritedDecayBinding {
+                version: 1,
+                multiplier_bits: crate::storage::inherited_policy::normalize(policy.multiplier)?,
+                adoption: control::GenerationRef {
+                    store_id: state.store_id,
+                    generation: state.committed_generation.next()?,
+                },
+                operation_id,
+            };
+            namespace.schema.as_mut().unwrap().inherited_decay = Some(binding.clone());
+            Some(binding)
+        } else {
+            None
+        };
         let next_revision = intent.capture.revision.next()?;
         namespace.schema.as_mut().unwrap().policy_revision = next_revision;
         // No live index: terminal identities participate in the same revision.
@@ -141,6 +160,7 @@ impl MetadataStore {
             before,
             after,
             cleared_inherited_decay,
+            adopted_inherited_decay,
             record_count: records.len() as u64,
             record_token_digest: crate::storage::lifecycle_migration::token_digest_values(
                 records.iter().map(|r| {
@@ -159,11 +179,12 @@ impl MetadataStore {
         }
         tx.open_table(NAMESPACE_TABLE)?
             .insert(namespace.id.get(), control::encode(&namespace)?.as_slice())?;
-        let receipt = self.record_receipt(
+        let receipt = control::record_reserved_receipt(
             &tx,
             ctx,
             hash,
             MutationOutcome::NativeNamespacePolicyUpdated { transition },
+            operation_id,
         )?;
         self.commit_catalog(tx, &receipt)?;
         Ok(Some(receipt))

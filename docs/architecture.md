@@ -473,10 +473,10 @@ The `QueryEngine` orchestrates a 9-stage search pipeline. All subsystem dependen
     v
   [8a] Compute composite score
   [8b] Apply temporal boost (Gaussian falloff around query time range)
-  [8c] Resolve supersedes chains (replace outdated with current version
-       WHEN THE REPLACEMENT PASSES THE QUERY'S FILTERS; otherwise the
-       original is kept, so a result is never dropped with nothing in
-       its place)
+  [8c] Resolve supersedes chains (replace outdated with the newest
+       version THAT PASSES THE QUERY'S FILTERS, falling back along the
+       chain; if none passes, the original is kept, so a result is never
+       dropped with nothing in its place)
   [8d] Sort descending, truncate to limit
     |
     v
@@ -874,7 +874,7 @@ The CLI `serve` subcommand also accepts shorthand env vars: `RECALLD_BIND` (comb
 |---------|-----------|----------|
 | `[server]` | `bind_address`, `port`, `request_timeout_ms`, `max_body_bytes` | `127.0.0.1:7680`, 30s, 10 MB |
 | `[storage]` | `data_dir`, `compaction_threshold`, `fsync_interval_ms` | `~/.recalld/data`, 20%, 5s |
-| `[decay]` | `sweep_interval_hours`, `phase_thresholds.*`, `permastore_threshold_days`, `decay_rate_multiplier` | 24h, 0.7/0.3/0.05, 1500d, 1.0 |
+| `[decay]` | `sweep_interval_hours`, `decay_rate_multiplier` (adopted per inheriting namespace at startup); `phase_thresholds.*` and `permastore_threshold_days` are deprecated with no effect (set per namespace) | 24h, 1.0 |
 | `[cache]` | `max_capacity_bytes`, `time_to_idle_secs`, `time_to_live_secs`, `warm_file_enabled` | 1 GB, 1h, 24h, true |
 | `[embedding]` | `provider`, `model_name`, `api_key_env`, `base_url`, `dimensions`, `batch_size`, `document_prefix`, `query_prefix` | Ollama, embeddinggemma:300m, 768 |
 | `[graph]` | `autolink_enabled`, `max_auto_links`, `auto_link_threshold`, `temporal_window_ms`, `max_entity_links` | true, 15, 0.50, 1h, 10 |

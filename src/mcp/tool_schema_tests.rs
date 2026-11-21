@@ -86,7 +86,7 @@ async fn live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation
                 .unwrap();
             assert_eq!(catalog["cacheScope"], "public");
             let tools = catalog["tools"].as_array().unwrap();
-            assert_eq!(tools.len(), 16);
+            assert_eq!(tools.len(), 17);
             for tool in tools {
                 let name = tool["name"].as_str().unwrap();
                 assert_eq!(
@@ -200,6 +200,7 @@ async fn live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation
         assert_eq!(f.record(*id).unwrap().to_bytes(), bytes);
     }
     assert!(SERVER_INSTRUCTIONS.split_whitespace().count() < 150);
+    assert!(SERVER_INSTRUCTIONS.starts_with("At task start, recall relevant context"));
 }
 
 #[tokio::test]

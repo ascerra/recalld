@@ -5,10 +5,10 @@ use crate::{
     model::{NamespaceConfig, NamespaceId, namespace::PhaseThresholds},
     storage::{catalog::NamespacePolicy, native_catalog::NamespacePolicyState},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PolicyValues {
     pub initial_stability: f32,
@@ -29,6 +29,55 @@ impl PolicyValues {
             decay_rate_multiplier: self.decay_rate_multiplier,
         }
     }
+    pub(crate) fn current(ns: &NamespaceConfig) -> Self {
+        Self {
+            initial_stability: ns.initial_stability,
+            default_difficulty: ns.default_difficulty,
+            phase_thresholds: ns.phase_thresholds,
+            permastore_threshold: ns.permastore_threshold,
+            desired_retention: ns.desired_retention,
+            decay_rate_multiplier: ns.decay_rate_multiplier,
+        }
+    }
+    /// Apply a partial change to these values, giving the complete policy object
+    /// a replacement needs. Only policy fields are accepted; `phaseThresholds`
+    /// may name a subset of its thresholds. Values are range-checked by the
+    /// strict replacement parser, not here.
+    pub fn merge(&self, patch: &Map<String, Value>) -> Result<Value, InputError> {
+        let mut policy = serde_json::to_value(self).expect("policy values serialize");
+        if patch.is_empty() {
+            return Err(invalid(
+                "MISSING_FIELD",
+                "",
+                "give at least one policy field to change",
+            ));
+        }
+        for (name, value) in patch {
+            if !PATCH_FIELDS.contains(&name.as_str()) {
+                return Err(invalid(
+                    "UNKNOWN_FIELD",
+                    &format!("/{name}"),
+                    "field is not a namespace policy field",
+                ));
+            }
+            match (name.as_str(), value) {
+                ("phaseThresholds", Value::Object(changes)) => {
+                    for (threshold, value) in changes {
+                        policy["phaseThresholds"][threshold] = value.clone();
+                    }
+                }
+                ("phaseThresholds", _) => {
+                    return Err(invalid(
+                        "INVALID_TYPE",
+                        "/phaseThresholds",
+                        "expected an object",
+                    ));
+                }
+                _ => policy[name] = value.clone(),
+            }
+        }
+        Ok(policy)
+    }
     pub(crate) fn retained(state: &NamespacePolicyState) -> Self {
         let mut ns = NamespaceConfig::default_namespace(0);
         state.apply(&mut ns);
@@ -42,6 +91,16 @@ impl PolicyValues {
         }
     }
 }
+/// The fields a partial policy change may name.
+pub const PATCH_FIELDS: [&str; 6] = [
+    "initialStability",
+    "defaultDifficulty",
+    "phaseThresholds",
+    "permastoreThreshold",
+    "desiredRetention",
+    "decayRateMultiplier",
+];
+
 #[derive(Debug, Clone)]
 pub struct PolicyRequest {
     pub namespace_id: NamespaceId,
@@ -119,6 +178,18 @@ impl PolicyRequest {
             ));
         }
         Self::parse(value, None, None, true)
+    }
+    /// A complete, unkeyed replacement built from `ns`'s current values with
+    /// `patch` applied, validated exactly like a caller-supplied replacement.
+    pub(crate) fn from_patch(
+        ns: &NamespaceConfig,
+        patch: &Map<String, Value>,
+    ) -> Result<Self, InputError> {
+        let policy = PolicyValues::current(ns).merge(patch)?;
+        Self::parse(&json!({ "policy": policy }), Some(ns.id), None, false).map_err(|mut e| {
+            e.field = e.field.trim_start_matches("/policy").to_owned();
+            e
+        })
     }
     pub(crate) fn from_http(
         value: &Value,

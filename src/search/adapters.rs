@@ -991,11 +991,11 @@ impl GraphReader for SharedGraphReader {
         crate::graph::activation::spreading_activation(&graph, seeds, namespace_id, &config)
     }
 
-    fn superseded_by(&self, id: &MemoryId) -> Option<MemoryId> {
+    fn superseded_by(&self, id: &MemoryId) -> Vec<MemoryId> {
         let graph = self.graph.read();
         // Chain-walking (and its cycle guard) lives on the graph itself,
         // where it can be unit-tested against real nodes and edges.
-        graph.supersedes_terminal(id)
+        graph.supersedes_chain(id)
     }
 }
 

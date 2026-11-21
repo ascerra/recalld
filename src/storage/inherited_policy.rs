@@ -105,16 +105,15 @@ pub(crate) fn resolve_bound(
     });
     // Legacy operations used the current runtime multiplier. Preserve that
     // behavior without recording an adoption or claiming a historical value.
+    let mut multiplier = multiplier;
     if ns.schema.is_some() && ns.decay_rate_multiplier.is_none() && !legacy_compatibility {
         let binding = ns.schema.as_ref().unwrap().inherited_decay.as_ref().ok_or_else(||
             StorageError::InvalidMutation("inherited policy is unknown; explicitly preview/adopt before dependent operations".into()))?;
         binding.validate()?;
-        if binding.multiplier_bits != normalize(multiplier)? {
-            return Err(StorageError::InvalidMutation(
-                "inherited configuration differs from canonical adoption; preview/adopt required"
-                    .into(),
-            ));
-        }
+        normalize(multiplier)?;
+        // The adopted value governs. Startup adopts a changed configuration;
+        // until that succeeds the namespace keeps its stored value.
+        multiplier = f32::from_bits(binding.multiplier_bits) as f64;
     }
     crate::decay::lifecycle::resolve_policy(ns, global, multiplier)
         .map_err(|e| StorageError::InvalidMutation(e.to_string()))
