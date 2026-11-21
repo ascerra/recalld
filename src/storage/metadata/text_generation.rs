@@ -62,6 +62,22 @@ impl TextGeneration {
 pub(crate) fn read_selection(
     read: &redb::ReadTransaction,
 ) -> Result<Option<TextGeneration>, StorageError> {
+    read_selection_with(read, None)
+}
+
+/// `read_selection` for a caller that already ran `control::validate_existing`
+/// on this same transaction and passes its result, so history is not rescanned.
+pub(crate) fn read_validated_selection(
+    read: &redb::ReadTransaction,
+    control: Option<&ControlState>,
+) -> Result<Option<TextGeneration>, StorageError> {
+    read_selection_with(read, Some(control))
+}
+
+fn read_selection_with(
+    read: &redb::ReadTransaction,
+    validated: Option<Option<&ControlState>>,
+) -> Result<Option<TextGeneration>, StorageError> {
     let present = read.list_tables()?.any(|t| t.name() == CATALOG.name());
     let wrong_type = read
         .list_multimap_tables()?
@@ -72,8 +88,11 @@ pub(crate) fn read_selection(
     if !present {
         return Ok(None);
     }
-    let state = control::validate_existing(read)?
-        .ok_or_else(|| StorageError::InvalidControl("text catalog without control".into()))?;
+    let state = match validated {
+        Some(control) => control.cloned(),
+        None => control::validate_existing(read)?,
+    }
+    .ok_or_else(|| StorageError::InvalidControl("text catalog without control".into()))?;
     let table = read.open_table(CATALOG)?;
     let active = table
         .get("active")?

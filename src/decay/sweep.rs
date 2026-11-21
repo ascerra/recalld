@@ -194,7 +194,8 @@ pub struct SweepResult {
     pub compaction_cleanup_pending: bool,
     /// Final recheck found changed canonical inputs, policy, or saving graph evidence.
     pub stale_skipped: u64,
-    /// Final phase/strength patch was byte-for-byte unchanged; no receipt committed.
+    /// Final phase/strength patch was unchanged, or (native) kept its phase:
+    /// strength alone is never written, readers recompute it; no receipt committed.
     pub unchanged_skipped: u64,
     /// Final patch was exempt from materialization; no receipt committed.
     pub exempt_skipped: u64,

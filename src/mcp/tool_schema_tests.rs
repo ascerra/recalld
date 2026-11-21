@@ -89,10 +89,7 @@ async fn live_metadata_schemas_actual_outputs_preserve_eras_scope_and_truncation
             assert_eq!(tools.len(), 17);
             for tool in tools {
                 let name = tool["name"].as_str().unwrap();
-                assert_eq!(
-                    tool["inputSchema"]["properties"]["contractVersion"]["enum"],
-                    json!([1])
-                );
+                assert!(tool["inputSchema"]["properties"]["contractVersion"].is_null());
                 if name == "get_memory" {
                     assert_eq!(
                         tool["inputSchema"]["properties"]["recordAccess"]["default"],
@@ -271,4 +268,63 @@ async fn live_metadata_schemas_actual_http_mcp_catalog_and_output() {
             record_fixture("http-empty", "namespace_stats", &schema, &value);
         }
     }
+}
+
+/// Version selectors are accepted but no longer advertised to agents.
+#[tokio::test]
+async fn version_selectors_are_hidden_but_still_accepted() {
+    let f = Fixture::new();
+    let before = f.storage.read().unwrap().control_state().unwrap();
+    let mut server = McpServer::new(Arc::new(bridge(&f, "default")));
+    let call = |id, name: &str, arguments: Value| {
+        modern_request(id, "tools/call", json!({"name":name,"arguments":arguments}))
+    };
+    let catalog = server
+        .handle_message(modern_request(1, "tools/list", json!({})))
+        .await
+        .unwrap()
+        .result
+        .unwrap();
+    for tool in catalog["tools"].as_array().unwrap() {
+        // Output receipts still report the contract a record was written under.
+        let text = format!("{} {}", tool["inputSchema"], tool["description"]);
+        assert!(!text.contains("contractVersion"), "{text}");
+        assert!(!text.contains("batchResultVersion"), "{text}");
+    }
+    for instructions in [SERVER_INSTRUCTIONS, SINGLE_NAMESPACE_INSTRUCTIONS] {
+        assert!(!instructions.to_lowercase().contains("contract"));
+    }
+    for (name, arguments, accepted) in [
+        ("get_session", json!({"contractVersion":1}), true),
+        ("namespace_stats", json!({"contractVersion":1}), true),
+        ("get_session", json!({"contractVersion":2}), false),
+        ("namespace_stats", json!({"contractVersion":2}), false),
+        (
+            "store_memories",
+            json!({"memories":[{"summary":"never stored"}],"batchResultVersion":2}),
+            false,
+        ),
+    ] {
+        let result = server
+            .handle_message(call(2, name, arguments.clone()))
+            .await
+            .unwrap()
+            .result
+            .unwrap();
+        assert_eq!(
+            result["isError"] != true,
+            accepted,
+            "{name} {arguments}: {result}"
+        );
+        if arguments["contractVersion"] == 2 {
+            assert!(
+                result["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("contractVersion 2 is not supported"),
+                "{result}"
+            );
+        }
+    }
+    assert_eq!(f.storage.read().unwrap().control_state().unwrap(), before);
 }

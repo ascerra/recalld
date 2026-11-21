@@ -455,6 +455,57 @@ impl StorageEngineAdapter {
         self
     }
 
+    /// Strength and decay strength of each live memory of `namespace_id` as
+    /// search reports them now, or `None` without native policy inputs. The
+    /// sweep writes strength only with a phase change (#239), so the stored
+    /// value is as of the last write.
+    async fn current_strengths(
+        &self,
+        namespace_id: NamespaceId,
+    ) -> Result<Option<std::collections::HashMap<MemoryId, (f32, f32)>>, crate::storage::StorageError>
+    {
+        let Some(policy) = &self.native_policy else {
+            return Ok(None);
+        };
+        let storage = self.storage.clone();
+        let (ns, mut live) = tokio::task::spawn_blocking(move || {
+            use crate::storage::StorageError;
+            let storage = storage
+                .read()
+                .map_err(|e| Box::new(StorageError::RecoveryRequired(e.to_string())))?;
+            let ns = storage
+                .get_namespace(namespace_id)
+                .map_err(Box::new)?
+                .ok_or_else(|| Box::new(StorageError::NamespaceNotFound(namespace_id.get())))?;
+            let live: Vec<CachedRecord> = storage
+                .scan_all()
+                .map_err(Box::new)?
+                .iter()
+                .filter(|(_, r)| {
+                    r.namespace_id == namespace_id.get() && r.phase != DecayPhase::Tombstone
+                })
+                .map(|(_, r)| CachedRecord::from(r))
+                .collect();
+            Ok::<_, Box<StorageError>>((ns, live))
+        })
+        .await
+        .map_err(|e| crate::storage::StorageError::RecoveryRequired(e.to_string()))?
+        .map_err(|e| *e)?;
+        crate::search::project_strengths(
+            &ns,
+            policy,
+            self.clock.now_millis(),
+            &mut live,
+            &crate::search::adapters::SharedGraphReader::new(self.graph.clone()),
+        )
+        .map_err(|e| crate::storage::StorageError::InvalidMutation(e.to_string()))?;
+        Ok(Some(
+            live.iter()
+                .map(|r| (r.id, (r.strength, r.decay_strength)))
+                .collect(),
+        ))
+    }
+
     /// Creates a new adapter wrapping the storage engine, the cache, and
     /// the four indexes a delete has to clean.
     pub fn new(
@@ -769,7 +820,7 @@ impl state::StorageEngine for StorageEngineAdapter {
     ) -> Result<state::NamespaceStats, crate::storage::StorageError> {
         let storage = self.storage.clone();
 
-        tokio::task::spawn_blocking(move || {
+        let mut stats = tokio::task::spawn_blocking(move || {
             let storage_r = storage.read().map_err(|e| {
                 crate::storage::StorageError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -826,7 +877,7 @@ impl state::StorageEngine for StorageEngineAdapter {
                 0.0
             };
 
-            Ok(state::NamespaceStats {
+            Ok::<_, crate::storage::StorageError>(state::NamespaceStats {
                 memory_count,
                 tombstone_count,
                 phase_1_count,
@@ -843,7 +894,14 @@ impl state::StorageEngine for StorageEngineAdapter {
                 std::io::ErrorKind::Other,
                 format!("blocking task join error: {e}"),
             ))
-        })?
+        })??;
+        if let Some(current) = self.current_strengths(namespace_id).await?
+            && !current.is_empty()
+        {
+            stats.avg_strength = (current.values().map(|&(_, d)| d as f64).sum::<f64>()
+                / current.len() as f64) as f32;
+        }
+        Ok(stats)
     }
 
     async fn list_memories(
@@ -853,7 +911,7 @@ impl state::StorageEngine for StorageEngineAdapter {
         let storage = self.storage.clone();
         let filter = filter.clone();
 
-        tokio::task::spawn_blocking(move || {
+        let mut records = tokio::task::spawn_blocking(move || {
             let storage_r = storage.read().map_err(|e| {
                 crate::storage::StorageError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -902,7 +960,7 @@ impl state::StorageEngine for StorageEngineAdapter {
                 .map(|(_id, disk_record)| CachedRecord::from(&disk_record))
                 .collect();
 
-            Ok(filtered)
+            Ok::<_, crate::storage::StorageError>(filtered)
         })
         .await
         .map_err(|e| {
@@ -910,7 +968,19 @@ impl state::StorageEngine for StorageEngineAdapter {
                 std::io::ErrorKind::Other,
                 format!("blocking task join error: {e}"),
             ))
-        })?
+        })??;
+        let namespaces: std::collections::BTreeSet<u32> =
+            records.iter().map(|r| r.namespace_id.get()).collect();
+        for namespace in namespaces.into_iter().map(NamespaceId::new) {
+            if let Some(current) = self.current_strengths(namespace).await? {
+                for r in records.iter_mut().filter(|r| r.namespace_id == namespace) {
+                    if let Some(&(strength, decay)) = current.get(&r.id) {
+                        (r.strength, r.decay_strength) = (strength, decay);
+                    }
+                }
+            }
+        }
+        Ok(records)
     }
 
     async fn get_full_text(
@@ -959,7 +1029,7 @@ impl state::StorageEngine for StorageEngineAdapter {
         let storage = self.storage.clone();
         let tags_owned: Vec<Tag> = require_tags.to_vec();
 
-        tokio::task::spawn_blocking(move || {
+        let (mut page, total) = tokio::task::spawn_blocking(move || {
             let storage_r = storage.read().map_err(|e| {
                 crate::storage::StorageError::Io(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -981,7 +1051,17 @@ impl state::StorageEngine for StorageEngineAdapter {
                 std::io::ErrorKind::Other,
                 format!("blocking task join error: {e}"),
             ))
-        })?
+        })??;
+        if !page.is_empty()
+            && let Some(current) = self.current_strengths(namespace_id).await?
+        {
+            for (id, r) in &mut page {
+                if let Some(&(strength, decay)) = current.get(id) {
+                    (r.strength, r.decay_strength) = (strength, decay);
+                }
+            }
+        }
+        Ok((page, total))
     }
 
     async fn ping(&self) -> bool {

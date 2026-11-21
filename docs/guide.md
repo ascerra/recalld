@@ -962,7 +962,7 @@ Strengthen a memory so it decays more slowly.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `id` | string | Yes | Memory UUID to reinforce. |
-| `quality` | integer | No | Rating 1-4: 1=forgot (minimal stability growth), 2=hard, 3=good (default), 4=easy (strongest). |
+| `quality` | integer | No | Rating 1-4: 1=forgot (lowers stability), 2=hard, 3=good (default), 4=easy (strongest). |
 
 ### `forget_memory`
 
@@ -996,7 +996,7 @@ Find memories semantically similar to a given memory, or scan a namespace for du
 
 ### `move_memories`
 
-Move 1–100 distinct Full or Summary memories atomically between two explicitly named namespaces. The destination must already exist. IDs, retained content, lifecycle/access history, and graph edges are preserved; embeddings are regenerated from retained content using the exact destination provider and profile. Ghost and Tombstone records cannot be moved. An UnknownLegacy source is supported through regeneration; the destination must have an explicit Bound embedding profile matching the active provider exactly, and source/destination lifecycle revisions must be compatible. Physical cross-namespace edges remain, while namespace-scoped retrieval remains scoped. Namespaces are not access controls.
+Move 1–100 distinct Full or Summary memories atomically between two explicitly named namespaces. The destination must already exist. IDs, retained content, lifecycle/access history, and graph edges are preserved; embeddings are regenerated from retained content using the exact destination provider and profile. Ghost and Tombstone records cannot be moved. An UnknownLegacy source is supported through regeneration; the destination must have an explicit Bound embedding profile matching the active provider exactly, and the moved memories take on the destination's lifecycle and policy revision, keeping their decay clock and stability. Physical cross-namespace edges remain, while namespace-scoped retrieval remains scoped. Namespaces are not access controls.
 
 A batch may contain at most 16 MiB of retained full text. Larger requests are rejected before embedding or mutation; submit smaller batches with their own stable keys.
 
@@ -1190,12 +1190,68 @@ Tombstone is a separate phase for user-deleted memories (via `forget_memory`). G
 
 ### Reinforcement
 
-Each time a memory is reinforced, its stability increases. The FSRS algorithm calculates new stability based on the quality rating:
+`reinforce_memory` is how an agent tells recalld a memory helped, and it is the only thing that makes a memory last longer. Stability grows with the time since the memory was last reinforced (or stored): reinforcing a memory that had nearly faded strengthens it far more than reinforcing one that was just reinforced. The quality rating scales the growth:
 
-- **1 (forgot)**: Minimal stability growth (20% of normal increase).
+- **1 (forgot)**: The memory was wrong or unhelpful; its stability drops.
 - **2 (hard)**: Small stability increase.
 - **3 (good)**: Normal stability increase (default).
 - **4 (easy)**: Largest stability increase.
+
+Being returned by a recall does not strengthen a memory, so a memory that keeps being recalled but never helps fades like any other. This holds for namespaces on the explicit-feedback lifecycle: every new namespace, and `default` on a new store. Namespaces created by earlier releases behave differently until you migrate them; see the next section.
+
+### Moving to explicit feedback
+
+Each namespace follows one of two lifecycles:
+
+- **Explicit feedback** (`explicit_feedback_v2`), used by every namespace created from this release on: a recall records when it returned a memory but leaves the memory's decay clock alone, and only `reinforce_memory` strengthens it.
+- **Legacy** (`legacy_access_v1`), kept by namespaces created by earlier releases: every recall that records access restarts the decay clock, so a memory that keeps turning up stays at full strength however stale it is, and its stability never grows. `reinforce_memory` straight after such a recall adds nothing, because it measures growth from the clock the recall has just restarted ([#250](https://github.com/calebevans/recalld/issues/250)). Recalling with `recordAccess: false` avoids that, but migrating is the fix.
+
+Migrating is offline and never changes your store: `recalld lifecycle migrate` writes a migrated copy to a new directory, validates it, and tells you how to put it in place. Stop the daemon first, and close agent sessions, since `recalld mcp` starts the daemon again:
+
+```bash
+recalld daemon stop
+
+# Read-only: which namespaces are still on the legacy lifecycle, and what the next sweep does to them
+recalld lifecycle preview --all
+
+# Write the migrated copy; ~/.recalld/data is not changed
+recalld lifecycle migrate --all --destination ~/.recalld/data-explicit
+```
+
+`preview` prints, for each namespace still on the legacy lifecycle:
+
+```text
+Moving to explicit feedback leaves every decay clock and stability as it is: this is what the next sweep does either way. Afterwards, recalls no longer restart a memory's clock; only reinforce_memory strengthens it.
+  default: 6 memories; at the next decay sweep 4 move to Summary, 0 to Ghost, 0 are deleted
+  project-recalld: 3 memories; at the next decay sweep 1 move to Summary, 0 to Ghost, 0 are deleted
+```
+
+`migrate` prints the same preview, then:
+
+```text
+Migrated 2 namespace(s) into ~/.recalld/data-explicit. ~/.recalld/data is unchanged. To use the migrated store:
+
+  recalld daemon stop
+  mv ~/.recalld/data ~/.recalld/data.pre-lifecycle
+  mv ~/.recalld/data-explicit ~/.recalld/data
+  recalld daemon start
+
+Keep ~/.recalld/data.pre-lifecycle until you are happy; moving it back undoes the change.
+```
+
+Run those commands to swap the directories, keeping the original as your backup. Afterwards `recalld lifecycle preview --all` reports nothing to migrate.
+
+Use `--namespace NAME` instead of `--all` to migrate one namespace. `-d DIR` (or `RECALLD_DATA_DIR`) selects another store, and `--config` another config file.
+
+What changes and what does not:
+
+- No memory's stability, strength, phase or decay clock changes. The preview counts are what the next decay sweep does anyway; migration changes what later recalls do. A memory that agents recalled often but never reinforced has a recent clock, so it starts to fade from now on unless an agent reinforces it.
+- Each migrated namespace gets a receipt and a new policy revision. A namespace migrated from 1.x, which never recorded the `decay_rate_multiplier` it inherits, also records the configured `[decay]` value, with its own receipt, so the explicit lifecycle does not have to guess it. That step reads the whole namespace and refuses one with more than 100,000 memories, as startup adoption does.
+- To undo, stop the daemon and move `data.pre-lifecycle` back. Memories stored after the swap are only in the migrated store.
+- If the store changes while the command runs (the daemon was started), or any check fails, nothing is written to the destination. Start again with an empty destination.
+- The command needs room for up to two extra copies of the store next to the destination; the temporary one is removed as it goes.
+
+The flag form `recalld lifecycle --source DIR --request FILE (--destination DIR | --preview-at MILLIS)` runs one raw `LifecycleMigrationOptions` request and prints JSON; `preview` and `migrate` build those requests for you.
 
 ### Permastore
 
@@ -1230,6 +1286,8 @@ If startup cannot adopt the new value for a namespace (for example, a namespace 
 # Check for phase transitions every 6 hours instead of 24
 sweep_interval_hours = 6.0
 ```
+
+A sweep writes a memory only when it changes phase or is removed. The strength that recall, `minStrength`, `get_memory` and `namespace_stats` report is computed from the memory's stability and last access when you read it.
 
 **Phase thresholds and permastore** are set per namespace. The global `[decay.phase_thresholds]` and `permastore_threshold_days` settings are deprecated and have no effect.
 

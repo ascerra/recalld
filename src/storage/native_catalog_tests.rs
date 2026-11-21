@@ -327,7 +327,7 @@ async fn native_catalog_replay_before_provider_cas_and_real_record_reopen() {
     );
     assert_eq!(
         ns.schema.as_ref().unwrap().lifecycle_version,
-        crate::model::schema::LifecycleVersion::LegacyAccessV1
+        crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
     );
     assert!(matches!(
         ns.schema.as_ref().unwrap().embedding_binding,

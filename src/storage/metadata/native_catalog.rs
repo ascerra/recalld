@@ -130,6 +130,7 @@ impl MetadataStore {
             profile: profile.clone(),
             policy: NamespacePolicyState::capture(&config)?,
             inherited_decay: config.schema.as_ref().unwrap().inherited_decay.clone(),
+            lifecycle_version: Some(config.schema.as_ref().unwrap().lifecycle_version),
         };
         let receipt = control::record_reserved_receipt(
             &tx,

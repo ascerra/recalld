@@ -72,12 +72,12 @@ pub fn inspect_schema(source: &Path) -> Result<SchemaInspection, StorageError> {
 fn inspect_owned(source: &Path) -> Result<SchemaInspection, StorageError> {
     let (_copy, db) = super::validation::inspect_database(&source.join("meta.db"))?;
     let tx = db.begin_read()?;
-    let control = control::validate_existing(&tx)?.ok_or_else(|| {
+    let (control, schema) = control::validate_existing_with_schema(&tx)?;
+    let control = control.ok_or_else(|| {
         StorageError::RecoveryRequired(
             "source has no durable lineage; use offline text migration first".into(),
         )
     })?;
-    let schema = super::canonical_schema::read_state(&tx, &control)?;
     let namespaces = tx
         .open_table(NAMESPACE_TABLE)?
         .iter()?
