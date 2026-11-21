@@ -369,6 +369,19 @@ pub trait NamespaceRegistry: Send + Sync {
         Err(crate::native_catalog_adapter::CatalogError::Unavailable)
     }
 
+    /// Change some of a namespace's decay policy: the current values with
+    /// `patch` applied are sent as one complete replacement. Returns the
+    /// HTTP-style status and the policy envelope.
+    async fn update_namespace_policy(
+        &self,
+        _namespace: &str,
+        _patch: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(u16, serde_json::Value), BridgeError> {
+        Err(BridgeError::Unavailable(
+            "namespace policy updates are not available on this server".into(),
+        ))
+    }
+
     /// Native catalog entry remains behind the unconditional public v2 gate.
     async fn create_native_namespace(
         &self,
@@ -952,6 +965,72 @@ pub struct NamespaceInfo {
     pub memory_count: u64,
     /// Creation timestamp as ISO 8601 string.
     pub created_at: String,
+    /// The namespace's decay policy. Absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ui", ts(optional))]
+    pub policy: Option<NamespacePolicyView>,
+}
+
+/// A namespace's decay policy as the sweep applies it.
+///
+/// The first six fields are the stored policy, in the same shape
+/// `update_namespace_policy` accepts. The rest are derived.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
+pub struct NamespacePolicyView {
+    /// Stability, in days, a new memory starts with.
+    pub initial_stability: f32,
+    /// FSRS difficulty a new memory starts with.
+    pub default_difficulty: f32,
+    /// Target retention for FSRS interval scheduling.
+    pub desired_retention: f32,
+    /// Retrievability thresholds for Full -> Summary -> Ghost -> deletion.
+    pub phase_thresholds: crate::model::namespace::PhaseThresholds,
+    /// Stability, in days, at which a memory becomes permastore.
+    pub permastore_threshold: f32,
+    /// The namespace's own multiplier; null when it inherits the
+    /// `[decay]` setting.
+    pub decay_rate_multiplier: Option<f32>,
+    /// The multiplier the sweep uses: the namespace's own, else the
+    /// inherited one. 0 disables decay.
+    pub effective_decay_rate_multiplier: f32,
+    /// Days until a memory that is never recalled or reinforced drops to
+    /// Summary, starting at `initialStability`. Null when decay is disabled.
+    pub days_until_summary: Option<f32>,
+    /// Days until that memory drops to Ghost. Null when decay is disabled.
+    pub days_until_ghost: Option<f32>,
+}
+
+impl NamespacePolicyView {
+    /// Resolve `ns` the way the sweep does. `None` if the stored policy
+    /// does not resolve.
+    pub fn resolve(
+        ns: &crate::model::NamespaceConfig,
+        inputs: &crate::storage::native_lifecycle::NativePolicyInputs,
+    ) -> Option<Self> {
+        let policy =
+            crate::decay::lifecycle::resolve_policy(ns, &inputs.global, inputs.multiplier).ok()?;
+        let fsrs = crate::decay::FsrsEngine::new(&policy.config);
+        let multiplier = policy.decay_rate_multiplier;
+        // `retrievability` divides elapsed time by the multiplier, so the
+        // real time to reach a threshold is the unscaled time times it.
+        let days = |threshold| {
+            Some(multiplier * fsrs.days_until_threshold(policy.config.initial_stability, threshold))
+                .filter(|days| multiplier > 0.0 && days.is_finite())
+        };
+        Some(Self {
+            initial_stability: ns.initial_stability,
+            default_difficulty: ns.default_difficulty,
+            desired_retention: ns.desired_retention,
+            phase_thresholds: ns.phase_thresholds,
+            permastore_threshold: ns.permastore_threshold,
+            decay_rate_multiplier: ns.decay_rate_multiplier,
+            effective_decay_rate_multiplier: multiplier,
+            days_until_summary: days(policy.config.phase_1_threshold),
+            days_until_ghost: days(policy.config.phase_2_threshold),
+        })
+    }
 }
 
 /// Namespace statistics.
@@ -990,6 +1069,10 @@ pub struct NamespaceStats {
     /// (`memory_count` x `embeddingDim` x 4). NOT the size of
     /// `vectors.dat`, which retains freed slots until compaction.
     pub vector_bytes: u64,
+    /// The namespace's decay policy. Absent from older daemons.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ui", ts(optional))]
+    pub policy: Option<NamespacePolicyView>,
 }
 
 /// Memory counts by decay phase.
@@ -1493,6 +1576,7 @@ mod tests {
             avg_strength: 0.8,
             edge_count: 0,
             vector_bytes: 16,
+            policy: None,
         };
 
         let encoded = serde_json::to_value(&stats).expect("encodes");

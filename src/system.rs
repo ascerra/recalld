@@ -356,7 +356,7 @@ impl Recalld {
     async fn with_prepared_storage(
         config: RecalldConfig,
         clock: Arc<dyn crate::time::Clock>,
-        engine: RedbStorageEngine,
+        mut engine: RedbStorageEngine,
         embedding: Arc<dyn EmbeddingProvider>,
     ) -> Result<Self> {
         if std::path::Path::new(&config.storage.data_dir)
@@ -378,6 +378,19 @@ impl Recalld {
                 source: Some(Box::new(e)),
             }
         })?;
+        if config.decay.sets_deprecated_thresholds() {
+            tracing::warn!(
+                "[decay.phase_thresholds] and decay.permastore_threshold_days (and \
+                 RECALLD_DECAY_FULL_TO_SUMMARY, RECALLD_DECAY_SUMMARY_TO_GHOST, \
+                 RECALLD_DECAY_GHOST_TO_DELETE, RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS) are \
+                 deprecated and have no effect: thresholds are set per namespace"
+            );
+        }
+        startup::adopt_changed_multiplier(
+            &config,
+            &mut engine,
+            crate::time::Clock::now_millis(clock.as_ref()),
+        );
         let native_prefix = true;
         let config = Arc::new(config);
         let (shutdown_tx, _) = watch::channel(false);

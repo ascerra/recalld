@@ -17,6 +17,7 @@ use crate::model::id::NamespaceId;
 /// - `R <= ghost_to_delete` => eligible for deletion
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ui", derive(ts_rs::TS))]
 pub struct PhaseThresholds {
     /// R below this triggers Full -> Summary transition.
     pub full_to_summary: f32,

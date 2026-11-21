@@ -1,11 +1,57 @@
 use super::*;
 use crate::storage::control::GenerationRef;
 use crate::storage::inherited_policy::{
-    self, AdoptInheritedDecay, InheritedDecayAdopted, InheritedDecayBinding,
+    self, AdoptInheritedDecay, InheritedDecayAdopted, InheritedDecayBinding, InheritedDecayPreview,
 };
 use sha2::{Digest, Sha256};
 
+fn plan(
+    source: GenerationRef,
+    ns: &NamespaceConfig,
+    bits: u32,
+    sampled_at: i64,
+    rows: &impl ReadableTable<&'static [u8], &'static [u8]>,
+    edges: &crate::storage::edges::EdgeStore,
+) -> Result<InheritedDecayPreview, StorageError> {
+    let edge_read = edges.read_transaction()?;
+    let edge_table = edge_read.open_table(crate::storage::edges::FORWARD_EDGES)?;
+    inherited_policy::preview(
+        source,
+        ns,
+        bits,
+        sampled_at,
+        rows.iter()?.map(|r| {
+            let (k, v) = r?;
+            inherited_policy::decode_row(k.value(), v.value())
+        }),
+        edge_table.iter()?.map(|r| {
+            let (k, v) = r?;
+            crate::storage::PersistedEdge::from_forward(k.value(), v.value())
+        }),
+    )
+}
+
 impl MetadataStore {
+    /// Preview from the live owner, for startup adoption. The adoption itself
+    /// re-plans inside its write transaction and rejects any difference.
+    pub(crate) fn preview_inherited_decay(
+        &self,
+        ns: &NamespaceConfig,
+        bits: u32,
+        sampled_at: i64,
+        edges: &crate::storage::edges::EdgeStore,
+    ) -> Result<InheritedDecayPreview, StorageError> {
+        let read = self.db.begin_read()?;
+        let state = self.native_control_at(&read)?;
+        plan(
+            state.generation_ref(),
+            ns,
+            bits,
+            sampled_at,
+            &read.open_table(META_TABLE)?,
+            edges,
+        )
+    }
     pub(crate) fn adopt_inherited_decay(
         &self,
         guard: &MutationGuard<'_>,
@@ -26,25 +72,14 @@ impl MetadataStore {
             ));
         }
         let mut ns = namespace_state::require_namespace_active(&tx, request.preview.namespace_id)?;
-        let actual = {
-            let rows = tx.open_table(META_TABLE)?;
-            let edge_read = edges.read_transaction()?;
-            let edge_table = edge_read.open_table(crate::storage::edges::FORWARD_EDGES)?;
-            inherited_policy::preview(
-                state.generation_ref(),
-                &ns,
-                request.preview.multiplier_bits,
-                request.preview.sampled_at,
-                rows.iter()?.map(|r| {
-                    let (k, v) = r?;
-                    inherited_policy::decode_row(k.value(), v.value())
-                }),
-                edge_table.iter()?.map(|r| {
-                    let (k, v) = r?;
-                    crate::storage::PersistedEdge::from_forward(k.value(), v.value())
-                }),
-            )?
-        };
+        let actual = plan(
+            state.generation_ref(),
+            &ns,
+            request.preview.multiplier_bits,
+            request.preview.sampled_at,
+            &tx.open_table(META_TABLE)?,
+            edges,
+        )?;
         if actual != request.preview {
             return Err(StorageError::LifecycleConflict(
                 "adoption preview canonical evidence changed".into(),

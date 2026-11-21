@@ -96,23 +96,26 @@ pub const CATALOG_TTL_MS: u64 = 3_600_000;
 pub const RESOURCE_READ_TTL_MS: u64 = 0;
 
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
-pub const SERVER_INSTRUCTIONS: &str = "Start with get_session (or recalld://session). Reuse namespaces: default for shared facts, project namespaces for project knowledge, optional topic namespaces. \
-    List before creating; avoid per-agent/session namespaces. Namespaces are not access controls. \
-    Recall relevant shared/project/topic context separately. Choose namespace explicitly; omitted store/search scope uses the session default, by-ID operations use record scope. \
-    Store durable knowledge, not source-derived facts or every turn. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
-    Similarity is advisory: never automatically delete matches. Check every batch item. \
+pub const SERVER_INSTRUCTIONS: &str = "At task start, recall relevant context from default and the matching project namespace separately (names: list_namespaces). \
+    Before finishing substantial work, store durable decisions, user preferences/corrections and non-obvious gotchas absent from code, PRs and issues, \
+    in an explicit namespace (default if shared, else project); skip routine details. \
+    List and reuse namespaces (topic ones optional) before creating; none per agent/session. Namespaces are not access controls. \
+    Omitted namespace means the session default (get_session, recalld://session); by-ID operations use record scope. \
+    Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
+    Similarity is advisory: never auto-delete matches. Check every batch item. \
     Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, namespace, storeId and original key/reservation. \
-    After upgrades, restart the MCP process and refresh tools; working reads do not prove write compatibility. \
-    Forget is not backup erasure; dimensions do not prove model identity.";
+    After upgrades, restart the MCP process and refresh tools; working reads don't prove write compatibility. \
+    Forget doesn't erase backups; dimensions don't prove model identity.";
 
 /// [`SERVER_INSTRUCTIONS`] for `[namespaces] mode = "single"`: no namespace guidance.
-pub const SINGLE_NAMESPACE_INSTRUCTIONS: &str = "Start with get_session (or recalld://session). Single-namespace mode: this server is one shared store and every memory is in default. \
-    Do not pass namespace; other namespaces cannot be created or reached here. By-ID operations use record scope. \
-    Store durable knowledge, not source-derived facts or every turn. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
-    Similarity is advisory: never automatically delete matches. Check every batch item. \
+pub const SINGLE_NAMESPACE_INSTRUCTIONS: &str = "At task start, recall relevant context. \
+    Before finishing substantial work, store durable decisions, user preferences/corrections and non-obvious gotchas absent from code, PRs and issues; skip routine details. \
+    Single-namespace mode: every memory is in default (see get_session, recalld://session). Do not pass namespace; other namespaces cannot be created or reached. \
+    By-ID operations use record scope. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
+    Similarity is advisory: never auto-delete matches. Check every batch item. \
     Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, storeId and original key/reservation. \
-    After upgrades, restart the MCP process and refresh tools; working reads do not prove write compatibility. \
-    Forget is not backup erasure; dimensions do not prove model identity.";
+    After upgrades, restart the MCP process and refresh tools; working reads don't prove write compatibility. \
+    Forget doesn't erase backups; dimensions don't prove model identity.";
 
 // ── JSON-RPC error codes ────────────────────────────────────────────
 
@@ -347,6 +350,9 @@ pub struct ToolInfo {
     /// Behavioral hints for tool UIs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub annotations: Option<ToolAnnotations>,
+    /// Tool `_meta`, e.g. Claude Code's `anthropic/alwaysLoad`.
+    #[serde(rename = "_meta", default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Value>,
 }
 
 /// Behavioral hints for tool UIs.

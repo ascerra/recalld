@@ -39,6 +39,56 @@ pub(super) fn validate_native(
     Ok(())
 }
 
+/// Adopt a changed `decay_rate_multiplier` for every namespace that inherits
+/// it, through the receipted preview/adopt path, before anything is served. A
+/// namespace that cannot be adopted keeps its stored value and startup goes on.
+pub(super) fn adopt_changed_multiplier(
+    config: &RecalldConfig,
+    engine: &mut RedbStorageEngine,
+    now: i64,
+) {
+    let configured = config.decay.decay_rate_multiplier;
+    let (Ok(bits), Ok(namespaces)) = (
+        crate::storage::inherited_policy::normalize(configured),
+        engine.list_namespaces(),
+    ) else {
+        return;
+    };
+    for ns in namespaces {
+        let Some(stored) = ns
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.inherited_decay.as_ref())
+            .filter(|b| ns.decay_rate_multiplier.is_none() && b.multiplier_bits != bits)
+        else {
+            continue;
+        };
+        let stored = f32::from_bits(stored.multiplier_bits);
+        match engine.adopt_inherited_multiplier(&ns, bits, now) {
+            Ok(counts) => tracing::warn!(
+                namespace = %ns.name,
+                old_multiplier = stored,
+                new_multiplier = configured,
+                full_to_summary = counts.full_to_summary,
+                summary_to_ghost = counts.summary_to_ghost,
+                deletions = counts.ghost_to_delete,
+                "decay_rate_multiplier changed: adopted for this namespace; at the next decay sweep \
+                 the counted memories move to Summary or Ghost, or are deleted"
+            ),
+            Err(error) => tracing::warn!(
+                namespace = %ns.name,
+                namespace_id = ns.id.get(),
+                stored_multiplier = stored,
+                configured_multiplier = configured,
+                %error,
+                "decay_rate_multiplier change is not yet applied to this namespace; it keeps \
+                 the stored value. To apply it, stop the daemon and run \
+                 `recalld-cli policy preview-inherited` then `recalld-cli policy adopt-inherited`"
+            ),
+        }
+    }
+}
+
 pub(super) fn open_storage(
     config: &RecalldConfig,
     clock: &dyn crate::time::Clock,

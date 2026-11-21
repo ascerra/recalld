@@ -618,6 +618,7 @@ pub(crate) mod tests {
         fn tools(&self) -> Vec<ToolInfo> {
             vec![ToolInfo {
                 output_schema: None,
+                meta: None,
                 name: "store_memory".to_string(),
                 title: None,
                 description: "Store a memory".to_string(),
