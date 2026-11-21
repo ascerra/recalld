@@ -39,10 +39,35 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets --all-features
 
+  changes:
+    # Storage & recovery (~30 min) exercises most of the backend, not just
+    # src/storage, so it runs whenever a PR touches backend Rust code, the
+    # Cargo files or the test runner; UI-, docs- and changelog-only PRs skip it.
+    name: Changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      storage: ${{ steps.diff.outputs.storage }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then echo storage=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          git diff --name-only "origin/$GITHUB_BASE_REF...HEAD" > changed.txt
+          if grep -vE '^src/(ui|bench)/' changed.txt | grep -qE '^(src/|Cargo\.(toml|lock)$|\.github/ci/|\.github/workflows/ci\.yml$)'; then
+            echo storage=true >> "$GITHUB_OUTPUT"
+          else
+            echo storage=false >> "$GITHUB_OUTPUT"
+          fi
+
   test_shards:
     name: Tests — ${{ matrix.os == 'ubuntu-latest' && 'Ubuntu' || 'macOS' }} — ${{ matrix.group.name }}
+    needs: changes
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      SKIP: ${{ matrix.group.id == 'storage' && needs.changes.outputs.storage != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -55,18 +80,25 @@ jobs:
           # Includes CLI/binary/integration targets, doctests and new modules.
           - {id: runtime, name: 'Runtime & lifecycle'}
     steps:
+      - name: Skipped (no backend changes)
+        if: env.SKIP == 'true'
+        run: echo "This PR doesn't touch backend code; storage tests skipped."
       - uses: actions/checkout@v4
+        if: env.SKIP != 'true'
       - uses: dtolnay/rust-toolchain@master
+        if: env.SKIP != 'true'
         with:
           toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
+        if: env.SKIP != 'true'
       - name: Validate test partition runner
         if: matrix.group.id == 'runtime'
         run: python3 -m unittest discover -s .github/ci -p 'test_*.py'
       - name: Run assigned tests with ordinary Cargo/libtest
+        if: env.SKIP != 'true'
         run: python3 .github/ci/test_shards.py run --group '${{ matrix.group.id }}' --os '${{ matrix.os }}' --directory ci-results
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && env.SKIP != 'true'
         with:
           name: tests-${{ matrix.os }}-${{ matrix.group.id }}
           path: ci-results/
@@ -78,7 +110,7 @@ jobs:
     # must never become a successful or skipped aggregate.
     name: Test (${{ matrix.os }})
     if: always()
-    needs: test_shards
+    needs: [changes, test_shards]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -96,7 +128,9 @@ jobs:
           pattern: tests-${{ matrix.os }}-*
           path: ci-results
       - name: Require complete disjoint coverage and matching provenance
-        run: python3 .github/ci/test_shards.py verify --os '${{ matrix.os }}' --source '${{ github.sha }}' --directory ci-results
+        env:
+          SKIP_ARGS: ${{ needs.changes.outputs.storage != 'true' && '--skip storage' || '' }}
+        run: python3 .github/ci/test_shards.py verify --os '${{ matrix.os }}' --source '${{ github.sha }}' --directory ci-results $SKIP_ARGS
 
   build:
     name: Build (release)

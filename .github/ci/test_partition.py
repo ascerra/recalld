@@ -114,6 +114,20 @@ mod new_module { #[test] fn future() {} }
     def test_complete_collection(self):
         shards.verify(reports(), "source", "os")
 
+    def test_skipped_group_only_excuses_its_own_tests(self):
+        complete = reports()
+        without = [r for r in complete if r["group"] != "storage"]
+        shards.verify(without, "source", "os", ("storage",))
+        with self.assertRaises(ValueError):
+            shards.verify(without, "source", "os")
+        with self.assertRaises(ValueError):
+            shards.verify([r for r in without if r["group"] != "api"], "source", "os", ("storage",))
+        with self.assertRaises(ValueError):
+            shards.verify(complete, "source", "os", ("storage",))
+        with self.assertRaises(ValueError):
+            shards.verify([r for r in complete if r["group"] != shards.DEFAULT_GROUP],
+                          "source", "os", (shards.DEFAULT_GROUP,))
+
     def test_rejects_missing_duplicate_foreign_failed_and_drift(self):
         mutations = [
             lambda r: r.pop(),

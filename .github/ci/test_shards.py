@@ -182,9 +182,13 @@ def run(group, directory, os_name):
     (directory / "report.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
-def verify(reports, source, os_name):
-    check(len(reports) == len(GROUPS), "missing or extra group reports")
-    check(sorted(r["group"] for r in reports) == sorted(GROUPS), "duplicate/wrong group")
+def verify(reports, source, os_name, skipped=()):
+    # A group is skipped only when CI decided its tests can't be affected
+    # (storage on a PR that leaves the backend alone); everything else must run.
+    check(DEFAULT_GROUP not in skipped, "the default group is never skipped")
+    expected = [g for g in GROUPS if g not in skipped]
+    check(len(reports) == len(expected), "missing or extra group reports")
+    check(sorted(r["group"] for r in reports) == sorted(expected), "duplicate/wrong group")
     baseline = reports[0]
     for report in reports:
         check(report["success"] is True and report["groups"] == list(GROUPS), "unsuccessful group")
@@ -207,7 +211,9 @@ def verify(reports, source, os_name):
             expected_results = {n: "ignored" if n in harness["ignored"] else "ok" for n in selected}
             check(evidence["results"] == expected_results, "missing/failed/extra test result")
             found.extend(selected)
-        check(sorted(found) == harness["names"], "partition union differs from inventory")
+        omitted = {n for g in skipped for n in selection(harness, g)}
+        check(sorted(found) == [n for n in harness["names"] if n not in omitted],
+              "partition union differs from inventory")
         check(len(found) == len(set(found)), "duplicate test execution")
     for report in reports:
         doc = report["docs"]
@@ -219,7 +225,8 @@ def verify(reports, source, os_name):
             check(doc["results"] == {n: "ignored" if n in doc["ignored"] else "ok" for n in doc["names"]},
                   "incomplete docs results")
     print(f"Verified {os_name}: {sum(len(h['names']) for h in baseline['inventory'].values())} "
-          f"tests inventoried across {len(GROUPS)} semantic groups; docs and example compilation retained.")
+          f"tests inventoried across {len(GROUPS)} semantic groups; docs and example compilation retained."
+          + (f" Skipped (unaffected): {', '.join(skipped)}." if skipped else ""))
 
 
 if __name__ == "__main__":
@@ -229,6 +236,7 @@ if __name__ == "__main__":
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--os", required=True)
     parser.add_argument("--source")
+    parser.add_argument("--skip", action="append", default=[], choices=GROUPS)
     args = parser.parse_args()
     try:
         if args.mode == "run":
@@ -237,6 +245,6 @@ if __name__ == "__main__":
         else:
             check(args.source, "source required")
             verify([json.loads(p.read_text()) for p in args.directory.rglob("report.json")],
-                   args.source, args.os)
+                   args.source, args.os, tuple(args.skip))
     except (ValueError, KeyError, OSError, subprocess.SubprocessError) as error:
         sys.exit(str(error))
