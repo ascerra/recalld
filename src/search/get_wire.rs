@@ -325,11 +325,23 @@ impl QueryEngine {
                                 .into(),
                         ));
                     }
+                    // A legacy-access point (#239) takes the connection bonus only
+                    // while the graph view is ready; otherwise it reports the
+                    // bonus-free projection rather than failing.
                     let projects = payload.as_ref().is_some_and(|(ns, row)| {
                         exposed_phase(row.record.phase)
                             && ns.schema.as_ref().is_some_and(|s| {
                                 s.lifecycle_version
                                     == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
+                                    || (point.require_graph().is_ok()
+                                        && !matches!(
+                                            super::strength::projection_policy(
+                                                ns,
+                                                &policy.global,
+                                                policy.multiplier
+                                            ),
+                                            Ok(None)
+                                        ))
                             })
                     });
                     if projects && graph.is_none() {
@@ -396,12 +408,18 @@ impl QueryEngine {
         if exposed_phase(record.phase) {
             let mut strength =
                 StrengthContext::pin_at(self, namespace, record_access, selected.evaluated_at)?;
-            if strength.explicit() {
-                let graph = graph.ok_or_else(|| {
-                    SearchError::Unavailable("missing graph lease for point projection".into())
-                })?;
-                let reader = SharedGraphReader::pinned(graph.clone());
-                strength.project_namespace(&mut selected.donors, &reader)?;
+            match graph {
+                Some(graph) if strength.projects() => {
+                    let reader = SharedGraphReader::pinned(graph.clone());
+                    strength.project_namespace(&mut selected.donors, &reader)?;
+                }
+                None if strength.explicit() => {
+                    return Err(SearchError::Unavailable(
+                        "missing graph lease for point projection".into(),
+                    ));
+                }
+                // Legacy access without a ready graph view: no bonus (#239).
+                _ => {}
             }
             strength.apply(&mut record)?;
         }

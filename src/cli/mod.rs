@@ -9,6 +9,7 @@ mod commands;
 mod config;
 mod import;
 pub mod legacy_vector_repair;
+pub mod lifecycle;
 mod output;
 mod policy;
 mod vector_certification;

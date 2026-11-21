@@ -385,6 +385,11 @@ async fn move_native_actual_socket_mcp_preserves_history_replay_and_strict_reope
             schema.vector = after.schema.as_ref().unwrap().vector.clone();
             schema.embedding_origin = None;
             schema.lifecycle.record_generation = schema.lifecycle.record_generation.next().unwrap();
+            // Moved records follow the destination's policy (new namespaces use
+            // explicit feedback); clock, stability and history are unchanged.
+            let moved = &after.schema.as_ref().unwrap().lifecycle;
+            schema.lifecycle.lifecycle_version = moved.lifecycle_version;
+            schema.lifecycle.policy_revision = moved.policy_revision;
             assert_eq!(expected.encode().unwrap(), after.encode().unwrap());
         }
         // Check the real retained receipt's compact committed/unknown projection.

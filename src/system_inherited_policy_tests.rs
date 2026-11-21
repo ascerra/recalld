@@ -369,7 +369,7 @@ async fn inherited_policy_restart_changes_projection_only_through_adoption() {
 }
 
 /// Loopback Ollama-compatible embedder: no real provider or credential.
-async fn embedding_stub() -> (String, tokio::task::JoinHandle<()>) {
+pub(super) async fn embedding_stub() -> (String, tokio::task::JoinHandle<()>) {
     let app = axum::Router::new().route(
         "/api/embed",
         axum::routing::post(
@@ -387,7 +387,7 @@ async fn embedding_stub() -> (String, tokio::task::JoinHandle<()>) {
     (url, task)
 }
 
-async fn tool(core: &Recalld, name: &str, args: serde_json::Value) -> serde_json::Value {
+pub(super) async fn tool(core: &Recalld, name: &str, args: serde_json::Value) -> serde_json::Value {
     let bridge = crate::mcp::bridge_adapters::direct_bridge(core, "default".into());
     let result = crate::mcp::tools::dispatch_tool(&bridge, name, args).await;
     assert_ne!(result.is_error, Some(true), "{name}: {result:?}");

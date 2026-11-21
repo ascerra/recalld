@@ -1,5 +1,7 @@
 <script lang="ts">
   import { palette } from '$lib/palette.svelte';
+  import { fly } from 'svelte/transition';
+  import { untrack } from 'svelte';
   import { page } from '$app/state';
   import { createQuery } from '@tanstack/svelte-query';
   import Screen from '$lib/components/Screen.svelte';
@@ -11,9 +13,8 @@
   import { scope } from '$lib/scope.svelte';
   import { selection } from '$lib/selection.svelte';
   import { fetchGraph, activeSince } from '$lib/api/snapshot';
-  import { phaseName, truncateWords, count } from '$lib/format';
+  import { phaseName, count } from '$lib/format';
   import { EDGE_LABELS, EDGE } from '$lib/map/encoding';
-  import { memoryRows } from '$lib/api/memories';
   import { live } from '$lib/live.svelte';
   import { ago } from '$lib/format';
   import { simulate } from '$lib/map/simulator';
@@ -105,9 +106,12 @@
   });
   const daysLabel = $derived(days === 0 ? 'now' : days < 60 ? `+${days} d` : `+${Math.round(days / 30)} mo`);
 
-  let map: { zoomIn(): void; zoomOut(): void; fit(): void; focusNeighborhood(id: string): void; exitFocus(): void; center(id: string): void } | undefined = $state();
+  let map: { zoomIn(): void; zoomOut(): void; fit(): void; focusNeighborhood(id: string): void; exitFocus(): void; center(id: string, covered?: number): void; reveal(id: string, covered: number): void; redraw(): void } | undefined = $state();
+  // Height of the memory card plus its gap, so the map can keep the selection in view.
+  let cardH = $state(0);
+  const covered = $derived(cardH ? cardH + 72 : 0);
+  const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   let localGraph = $state(false);
-  let panelOpen = $state(true);
 
   // ?id=… (from Explore's "Show on map" or the palette's ⌘↵): select it and
   // center on it once the layout has settled.
@@ -118,28 +122,38 @@
     if (id) {
       if (graph.data?.index.has(id) && !shown?.index.has(id)) windowDays = 0;
       selection.select(id);
-      panelOpen = true;
-      if (settled) map?.center(id);
+      if (settled) map?.center(id, untrack(() => covered) || 360);
       else pendingCenter = id;
     }
   });
   function onsettled() {
     settled = true;
-    if (pendingCenter) map?.center(pendingCenter);
+    if (pendingCenter) map?.center(pendingCenter, covered || 360);
     pendingCenter = null;
   }
 
-  const selectedRow = createQuery(() => ({
-    queryKey: ['memory-row', selection.id],
-    queryFn: async () => (selection.id ? ((await memoryRows([selection.id]))[0] ?? null) : null),
-    enabled: !!selection.id,
-  }));
   function onkeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && localGraph && !palette.open) {
+    if (e.key !== 'Escape' || palette.open) return;
+    if (localGraph) {
       e.preventDefault();
       map?.exitFocus();
+    } else if (selection.id) {
+      // Esc dismisses the memory card.
+      e.preventDefault();
+      selection.select(null);
     }
   }
+  // Redraw the map whenever the card's size changes: Chromium can otherwise
+  // keep stale map pixels around a card layered over the WebGL canvas.
+  $effect(() => {
+    cardH;
+    map?.redraw();
+  });
+  // A clicked memory the card would cover slides up into view.
+  $effect(() => {
+    const id = selection.id;
+    if (id && covered) map?.reveal(id, covered);
+  });
 </script>
 
 <svelte:window {onkeydown} />
@@ -222,7 +236,6 @@
             onfocuschange={(f: boolean) => (localGraph = f)}
             onselect={(id) => {
               selection.select(id);
-              if (id) panelOpen = true;
             }}
           />
         {/await}
@@ -239,25 +252,17 @@
         <button type="button" class="zbtn" aria-label="Zoom out" onclick={() => map?.zoomOut()}><Icon name="minus" stroke={1.8} /></button>
         <button type="button" class="zbtn" aria-label="Fit graph to view" onclick={() => map?.fit()}><Icon name="fit" stroke={1.8} /></button>
       </div>
+      {#if selection.id}
+        <!-- The selected memory: the same card Explore opens under a row. -->
+        <div class="memory-card" bind:clientHeight={cardH} transition:fly={{ y: 24, duration: reducedMotion ? 0 : 180 }} onintroend={() => map?.redraw()} onoutroend={() => map?.redraw()}>
+          <MemoryPanel id={selection.id} layout="inline" heading onclose={() => selection.select(null)} onopen={(id) => selection.select(id)}
+            secondary={{ label: 'Local graph', onclick: () => map?.focusNeighborhood(selection.id!) }} />
+        </div>
+      {/if}
     {/if}
   </div>
 </Screen>
 
-{#if selection.id}
-  {#if panelOpen}
-    <div class="panel-wrap">
-      <button type="button" class="icon-btn collapse-panel" aria-label="Collapse details" onclick={() => (panelOpen = false)}><Icon name="expand" stroke={1.8} /></button>
-      <MemoryPanel id={selection.id} onclose={() => selection.select(null)}
-        secondary={{ label: 'Local graph', onclick: () => map?.focusNeighborhood(selection.id!) }} />
-    </div>
-  {:else}
-    <aside class="rail" aria-label="Selected memory, collapsed">
-      <button type="button" class="rail-btn" aria-label="Expand details" aria-expanded="false" onclick={() => (panelOpen = true)}><Icon name="collapse" stroke={1.8} /></button>
-      <span class="live-dot"></span>
-      <span class="mono vertical">{truncateWords(selectedRow.data?.summary ?? 'Summary dropped', 22)}</span>
-    </aside>
-  {/if}
-{/if}
 
 <style>
   .toolbar {
@@ -433,54 +438,20 @@
     color: var(--color-text);
     cursor: pointer;
   }
-  .panel-wrap {
-    position: relative;
-    display: flex;
-    height: 100%;
-  }
-  .collapse-panel {
+  .memory-card {
     position: absolute;
-    left: calc(var(--space-5) * -1);
-    top: var(--space-6);
-    z-index: 5;
-    width: var(--space-6);
-    height: var(--space-6);
+    left: var(--space-4);
+    right: var(--space-4);
+    /* Above the legend and zoom controls, which stay usable. */
+    bottom: calc(var(--space-4) + var(--nav-item-h) + var(--space-3));
+    max-height: 50%;
+    overflow-y: auto;
+    z-index: 6;
     background: var(--color-surface);
     border: var(--hairline) solid var(--color-border);
-  }
-  .rail {
-    flex: 0 0 var(--panel-rail);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: calc(var(--space-4) + var(--space-1) / 2);
-    padding: var(--space-5) 0;
-    background: var(--color-surface);
-    border-left: var(--hairline) solid var(--color-border);
-  }
-  .rail-btn {
-    width: var(--nav-item-h);
-    height: var(--nav-item-h);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: var(--hairline) solid var(--color-border);
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--color-text-2);
-    cursor: pointer;
-  }
-  .live-dot {
-    width: var(--dot);
-    height: var(--dot);
-    border-radius: var(--radius-pill);
-    background: var(--color-accent);
-    box-shadow: 0 0 0 calc(var(--hairline) * 3) var(--color-accent-soft-border);
-  }
-  .vertical {
-    writing-mode: vertical-rl;
-    font-size: var(--text-status);
-    letter-spacing: 0.04em;
-    color: var(--color-text-2);
+    border-radius: var(--radius-lg);
+    /* A light shadow: a large blurred one over the WebGL map made Chromium
+       stop drawing the memories around the card. */
+    box-shadow: var(--shadow-tooltip);
   }
 </style>

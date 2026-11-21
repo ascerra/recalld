@@ -22,6 +22,41 @@ pub(super) struct StrengthContext {
     bonuses: HashMap<MemoryId, f32>,
 }
 
+/// The policy reads project strength under, or `None` to report the stored
+/// value. The native sweep writes strength only with a phase change (#239), so
+/// every native namespace projects. A legacy-access namespace whose policy does
+/// not resolve keeps its stored strength, as the sweep leaves it; an
+/// explicit-feedback one fails as before.
+pub(crate) fn projection_policy(
+    ns: &NamespaceConfig,
+    global: &crate::decay::DecayConfig,
+    multiplier: f64,
+) -> Result<Option<EffectiveLifecyclePolicy>> {
+    let Some(schema) = &ns.schema else {
+        return Ok(None);
+    };
+    let policy = crate::storage::inherited_policy::resolve_bound(ns, global, multiplier)
+        .map_err(|e| SearchError::MetadataError(e.to_string()));
+    if schema.lifecycle_version == LifecycleVersion::ExplicitFeedbackV2 {
+        policy.map(Some)
+    } else {
+        Ok(policy.ok())
+    }
+}
+
+/// Projects one namespace's `records` to the strength and decay strength search
+/// reports at `now`, for reads outside the query pipeline.
+pub fn project_strengths(
+    namespace: &NamespaceConfig,
+    inputs: &crate::storage::native_lifecycle::NativePolicyInputs,
+    now: i64,
+    records: &mut [CachedRecord],
+    graph: &dyn GraphReader,
+) -> Result<()> {
+    StrengthContext::with_inputs(namespace, &inputs.global, inputs.multiplier, false, now)?
+        .project_namespace(records, graph)
+}
+
 impl StrengthContext {
     pub fn pin(engine: &QueryEngine, ns: &NamespaceConfig, record_access: bool) -> Result<Self> {
         Self::pin_with_sample(engine, ns, record_access, || engine.clock.now_millis())
@@ -42,6 +77,34 @@ impl StrengthContext {
         record_access: bool,
         sample: impl FnOnce() -> i64,
     ) -> Result<Self> {
+        let explicit = ns
+            .schema
+            .as_ref()
+            .is_some_and(|s| s.lifecycle_version == LifecycleVersion::ExplicitFeedbackV2);
+        if explicit && record_access && !engine.access_recorder.supports_native_exposure() {
+            if let Some(schema) = &ns.schema {
+                schema.validate(ns).map_err(SearchError::MetadataError)?;
+            }
+            return Err(SearchError::Internal(
+                "explicit-feedback exposure writer unavailable; recordAccess must be false".into(),
+            ));
+        }
+        Self::with_inputs(
+            ns,
+            &engine.decay_policy,
+            engine.decay_multiplier,
+            record_access,
+            sample(),
+        )
+    }
+
+    fn with_inputs(
+        ns: &NamespaceConfig,
+        global: &crate::decay::DecayConfig,
+        multiplier: f64,
+        record_access: bool,
+        evaluated_at: i64,
+    ) -> Result<Self> {
         if let Some(schema) = &ns.schema {
             schema.validate(ns).map_err(SearchError::MetadataError)?;
         }
@@ -49,22 +112,7 @@ impl StrengthContext {
             .schema
             .as_ref()
             .map_or(LifecycleVersion::LegacyAccessV1, |s| s.lifecycle_version);
-        let explicit = lifecycle_version == LifecycleVersion::ExplicitFeedbackV2;
-        if explicit && record_access && !engine.access_recorder.supports_native_exposure() {
-            return Err(SearchError::Internal(
-                "explicit-feedback exposure writer unavailable; recordAccess must be false".into(),
-            ));
-        }
-        let policy = explicit
-            .then(|| {
-                crate::storage::inherited_policy::resolve_bound(
-                    ns,
-                    &engine.decay_policy,
-                    engine.decay_multiplier,
-                )
-            })
-            .transpose()
-            .map_err(|e| SearchError::MetadataError(e.to_string()))?;
+        let policy = projection_policy(ns, global, multiplier)?;
         Ok(Self {
             namespace: ns.id,
             requested_record_access: record_access,
@@ -73,13 +121,18 @@ impl StrengthContext {
             diagnostics: StrengthDiagnostics {
                 lifecycle_version,
                 policy_revision: ns.schema.as_ref().map(|s| s.policy_revision),
-                evaluated_at: sample(),
+                evaluated_at,
             },
             bonuses: HashMap::new(),
         })
     }
 
     pub fn explicit(&self) -> bool {
+        self.diagnostics.lifecycle_version == LifecycleVersion::ExplicitFeedbackV2
+    }
+
+    /// Whether reads report computed strength rather than the stored value.
+    pub fn projects(&self) -> bool {
         self.policy.is_some()
     }
 
@@ -93,7 +146,7 @@ impl StrengthContext {
         for record in records.iter_mut() {
             self.apply(record)?;
         }
-        if self.explicit() {
+        if self.projects() {
             let strengths: HashMap<_, _> = records
                 .iter()
                 .filter(|r| {
@@ -161,7 +214,7 @@ impl QueryEngine {
         requested_record_access: bool,
     ) -> Result<StrengthContext> {
         let mut context = StrengthContext::pin(self, namespace, requested_record_access)?;
-        if context.explicit() {
+        if context.projects() {
             let mut records = self.meta_store.namespace_records(namespace.id).await?;
             context.project_namespace(&mut records, self.graph.as_ref())?;
         }
