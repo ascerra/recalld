@@ -3,19 +3,6 @@ name: UI
 # The local web UI (`recalld ui`, a default feature). Runs only when the UI or the
 # backend surfaces it depends on change.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "ui/**"
-      - "src/ui/**"
-      - "src/daemon/**"
-      - "src/api/**"
-      - "src/graph/**"
-      - "src/bench/synthetic.rs"
-      - "docs/ui/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - ".github/workflows/ui.yml"
   pull_request:
     paths:
       - "ui/**"
@@ -28,6 +15,10 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/ui.yml"
+
+concurrency:
+  group: ui-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
