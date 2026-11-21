@@ -64,6 +64,7 @@ fn known_failure(target: &Path, source: &[Seal]) -> Option<String> {
 /// Advisory classification; open rechecks while holding exclusive ownership.
 /// Unknown/future/mixed formats are errors, never treated as empty or legacy.
 pub(crate) fn classify(path: &Path) -> Result<StoreFormat, StorageError> {
+    let _receipts = super::control::ReceiptMemo::enter();
     let owner = StoreOwnership::acquire_for_upgrade(path, false)?;
     if pending(&owner.path).is_symlink()
         || pending(&owner.path).try_exists()?
@@ -86,6 +87,12 @@ fn classify_owned(path: &Path) -> Result<StoreFormat, StorageError> {
     }
     let (_copy, db) = super::validation::inspect_database_copy(&path.join("meta.db"), true)?;
     let read = db.begin_read()?;
+    // A current store is only ever opened next, by the owned native engine open,
+    // whose preflight runs this validation and more before any writable open.
+    // Validating its history here as well would only repeat that work.
+    if super::validation::native_format_header(&read)? {
+        return Ok(StoreFormat::Current);
+    }
     let control = super::control::validate_existing(&read)?;
     super::canonical_schema::validate_metadata_format(&read, control.as_ref())?;
     Ok(if control.is_some_and(|c| c.control_schema_version == 2) {
@@ -479,6 +486,7 @@ fn prepare_at(
     validate: impl Fn(&RedbStorageEngine) -> Result<(), StorageError>,
     mut boundary: impl FnMut(Phase) -> Result<(), StorageError>,
 ) -> Result<(RedbStorageEngine, UpgradeTransaction), StorageError> {
+    let _receipts = super::control::ReceiptMemo::enter();
     let owner = std::sync::Arc::new(StoreOwnership::acquire_for_upgrade(path, true)?);
     recover(&owner)?;
     match classify_owned(&owner.path)? {

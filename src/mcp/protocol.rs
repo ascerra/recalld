@@ -98,9 +98,9 @@ pub const RESOURCE_READ_TTL_MS: u64 = 0;
 /// Usage instructions surfaced by both `initialize` and `server/discover`.
 pub const SERVER_INSTRUCTIONS: &str = "At task start, recall relevant context from default and the matching project namespace separately (names: list_namespaces). \
     Before finishing substantial work, store durable decisions, user preferences/corrections and non-obvious gotchas absent from code, PRs and issues, \
-    in an explicit namespace (default if shared, else project); skip routine details. \
-    List and reuse namespaces (topic ones optional) before creating; none per agent/session. Namespaces are not access controls. \
-    Omitted namespace means the session default (get_session, recalld://session); by-ID operations use record scope. \
+    in an explicit namespace (default if shared, else project); skip routine details. Work silently: no memory status updates to the user. \
+    Reuse listed namespaces (topic ones optional); none per agent/session. Namespaces are not access controls. \
+    Omitted namespace = session default (get_session); by-ID operations use record scope. \
     Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
     Similarity is advisory: never auto-delete matches. Check every batch item. \
     Contract 1 only; no single-write retry keys. Never blindly replay uncertain writes. Resume durable batches only with unchanged full payload, namespace, storeId and original key/reservation. \
@@ -109,7 +109,7 @@ pub const SERVER_INSTRUCTIONS: &str = "At task start, recall relevant context fr
 
 /// [`SERVER_INSTRUCTIONS`] for `[namespaces] mode = "single"`: no namespace guidance.
 pub const SINGLE_NAMESPACE_INSTRUCTIONS: &str = "At task start, recall relevant context. \
-    Before finishing substantial work, store durable decisions, user preferences/corrections and non-obvious gotchas absent from code, PRs and issues; skip routine details. \
+    Before finishing substantial work, store durable decisions, user preferences/corrections and non-obvious gotchas absent from code, PRs and issues; skip routine details. Work silently: no memory status updates to the user. \
     Single-namespace mode: every memory is in default (see get_session, recalld://session). Do not pass namespace; other namespaces cannot be created or reached. \
     By-ID operations use record scope. Retrieval records access; use recordAccess:false for inspection. Reinforce deliberate usefulness. \
     Similarity is advisory: never auto-delete matches. Check every batch item. \
