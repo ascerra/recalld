@@ -205,19 +205,27 @@ impl MetadataStore {
     /// - Creates all tables on first open.
     /// - Loads or rebuilds the phase index from persisted bitmaps.
     pub(crate) fn open(path: &Path) -> Result<Self, StorageError> {
-        Self::open_with_ids(path, false, Box::new(super::ids::SystemIds))
+        Ok(Self::open_with_ids(path, false, Box::new(super::ids::SystemIds), false)?.0)
     }
 
     // Caller must already own the store and validate its complete inventory.
     pub(crate) fn open_native_lifecycle(path: &Path) -> Result<Self, StorageError> {
-        Self::open_with_ids(path, true, Box::new(super::ids::SystemIds))
+        Ok(Self::open_with_ids(path, true, Box::new(super::ids::SystemIds), false)?.0)
     }
 
+    /// `preflighted` is only for the engine's native reopen:
+    /// `validation::preflight_native` has just validated a disposable copy of
+    /// this unchanged file, under the ownership the engine still holds, and
+    /// covers every check of the copy inspection below; repeating it would copy
+    /// and rescan the whole store again. Also returns the text selection
+    /// validated in the opening snapshot, current until the first metadata write.
     pub(crate) fn open_with_ids(
         path: &Path,
         native_lifecycle_only: bool,
         ids: Box<dyn super::ids::IdSource>,
-    ) -> Result<Self, StorageError> {
+        preflighted: bool,
+    ) -> Result<(Self, Option<text_generation::TextGeneration>), StorageError> {
+        let _receipts = control::ReceiptMemo::enter();
         let fresh_native = native_lifecycle_only && !path.try_exists()?;
         if native_lifecycle_only
             && !fresh_native
@@ -234,7 +242,7 @@ impl MetadataStore {
         }
         // redb's writable open can change bookkeeping. Reject historical mode
         // on a disposable copy even for callers bypassing the engine.
-        if path.try_exists()? && path.metadata()?.len() > 0 {
+        if !preflighted && path.try_exists()? && path.metadata()?.len() > 0 {
             let (_copy, db) = super::validation::inspect_database_copy(path, true)?;
             let read = db.begin_read()?;
             let control = control::validate_existing(&read)?;
@@ -242,7 +250,9 @@ impl MetadataStore {
             if native_lifecycle_only {
                 restoration::validate_inventory(&read)?;
             }
-            if native_lifecycle_only && text_generation::read_selection(&read)?.is_none() {
+            if native_lifecycle_only
+                && text_generation::read_validated_selection(&read, control.as_ref())?.is_none()
+            {
                 return Err(StorageError::InvalidControl(
                     "native lifecycle entry requires the selected-text old-reader fence".into(),
                 ));
@@ -271,12 +281,22 @@ impl MetadataStore {
         // Inspect additive canonical state before any create/adoption transaction.
         // Partial or future layouts must never be repaired into a new lineage.
         let pristine;
+        let selection;
+        let mut vector_validation = None;
         {
             let read = db.begin_read()?;
-            text_generation::read_selection(&read)?;
             pristine = read.list_tables()?.next().is_none()
                 && read.list_multimap_tables()?.next().is_none();
-            let control = control::validate_existing(&read)?;
+            let (control, schema) = control::validate_existing_with_schema(&read)?;
+            // Existing native entry writes nothing before serving, so capture the
+            // owned validation from this snapshot instead of validating it again.
+            if native_lifecycle_only && !fresh_native {
+                vector_validation = Some(certification::OwnedVectorValidation::capture(
+                    &read,
+                    (control.clone(), schema),
+                )?);
+            }
+            selection = text_generation::read_validated_selection(&read, control.as_ref())?;
             removal_ledger::read_export(&read, control.as_ref())?;
             if let Some(state) = control {
                 if state.control_schema_version == 2 && !native_lifecycle_only {
@@ -351,7 +371,7 @@ impl MetadataStore {
             db,
             ids,
             native_lifecycle_only,
-            vector_validation: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            vector_validation: std::sync::Arc::new(std::sync::RwLock::new(vector_validation)),
             work_tracker: WorkTracker::new(store_id),
             view_publication: std::sync::Arc::new(
                 super::publication::PublicationRegistry::default(),
@@ -404,7 +424,7 @@ impl MetadataStore {
                 .any(|p| p.stage != crate::storage::purge::PurgeStage::Complete),
             std::sync::atomic::Ordering::SeqCst,
         );
-        if native_lifecycle_only {
+        if fresh_native {
             store.initialize_vector_validation()?;
         }
         let records = store.scan_all_for_recovery()?;
@@ -422,7 +442,7 @@ impl MetadataStore {
         store
             .derived_dirty
             .store(!pending.is_empty(), std::sync::atomic::Ordering::SeqCst);
-        Ok(store)
+        Ok((store, selection))
     }
 }
 

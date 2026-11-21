@@ -33,7 +33,13 @@ impl MetadataStore {
         });
         let (binding, namespace) =
             resolve_namespace(&tx, &state, name, expected.as_ref(), MAX_ROW_BYTES)?;
-        let schema = canonical_schema::read_state(&tx, &state)?;
+        // Native history was fully validated by owned reopen; native_control_at
+        // already required that validation at this exact generation.
+        let schema = if self.native_lifecycle_only {
+            Some(self.owned_schema_at(&tx, state.generation_ref())?)
+        } else {
+            canonical_schema::read_state(&tx, &state)?
+        };
         if namespace.schema.is_none() {
             for (field, prefix, values) in [
                 ("entities", "entity/", &request.filters.labels.entities),

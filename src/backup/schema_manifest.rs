@@ -65,10 +65,10 @@ pub(crate) fn sha256_file(path: &Path) -> Result<[u8; 32], std::io::Error> {
 pub(crate) fn capture(path: &Path) -> Result<Option<BackupManifestV2>, StorageError> {
     let (_copy, metadata) = validation::inspect_database(&path.join("meta.db"))?;
     let read = metadata.begin_read()?;
-    let Some(control) = control::validate_existing(&read)? else {
+    let (Some(control), schema) = control::validate_existing_with_schema(&read)? else {
         return Ok(None);
     };
-    let Some(schema) = canonical_schema::read_state(&read, &control)? else {
+    let Some(schema) = schema else {
         return Ok(None);
     };
     let mut namespaces = Vec::new();
