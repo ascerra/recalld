@@ -1212,6 +1212,8 @@ decay_rate_multiplier = 0.0
 sweep_interval_hours = 6.0
 ```
 
+A sweep writes a memory only when it changes phase or is removed. The strength that recall, `minStrength`, `get_memory` and `namespace_stats` report is computed from the memory's stability and last access when you read it.
+
 **Phase thresholds**:
 
 ```toml

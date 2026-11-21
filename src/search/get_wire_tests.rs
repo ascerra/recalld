@@ -397,7 +397,7 @@ async fn prepared_get_actual_budget_rejects_before_exposure_and_missing_scope_is
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn prepared_get_actual_native_only_projection_graph_is_required() {
+async fn prepared_get_actual_native_projection_graph_is_required() {
     let f = similar_fixture().await;
     // 'other' is ExplicitFeedbackV2; default remains native LegacyAccessV1.
     {
@@ -439,6 +439,9 @@ async fn prepared_get_actual_native_only_projection_graph_is_required() {
     assert_eq!(reply.http_status, 503, "{reply:?}");
     assert_eq!(f.clock.0.load(Ordering::SeqCst), calls);
     assert!(reply.envelope.data.is_none());
+    // A legacy-access point projects too (#239): its decay strength needs the
+    // graph, so it waits for the graph view like the explicit one.
+    let calls = f.clock.0.load(Ordering::SeqCst);
     let reply = f
         .engine
         .get_contract(
@@ -446,10 +449,9 @@ async fn prepared_get_actual_native_only_projection_graph_is_required() {
             crate::daemon::protocol::MAX_MESSAGE_SIZE,
         )
         .await;
-    assert_eq!(
-        reply.http_status, 200,
-        "native materialized point should not use graph: {reply:?}"
-    );
+    assert_eq!(reply.http_status, 503, "{reply:?}");
+    assert_eq!(f.clock.0.load(Ordering::SeqCst), calls);
+    assert!(reply.envelope.data.is_none());
     assert_eq!(bytes(&f.f), before);
 }
 

@@ -14,6 +14,7 @@
 
 - `get_memory` and the web UI's memory view now return memories that older releases left in the Summary phase with their full text, or in the Ghost phase with tags, instead of failing with "Prepared remote response is unavailable" after an upgrade. The record is returned as stored. When a daemon reply is still rejected, the error message and the MCP or UI process log name the failed check. (#231)
 - docs/architecture.md gave the default decay timeline as about 36 days to Summary and 280 to Ghost; the formula gives about 16.5 and 160 (and about 6,300 days to removal, not 13,300). (#234)
+- A decay sweep wrote every memory on every pass, because strength changes a little each time, and each write keeps a receipt in `meta.db` for the life of the store: about 5 MB and 5 s of daemon start time per sweep on a 1,200-memory store. A sweep now writes a memory only when it changes phase or is removed. Strength is computed when it is read: recall and its `minStrength` filter, `get_memory`, `namespace_stats` and the HTTP API report the strength at the time of the request, as namespaces migrated to explicit feedback already did, instead of the value stored at the last write. Phase changes still happen on time, since the sweep decides them from computed strength. Part of #239.
 
 ### Local web UI
 

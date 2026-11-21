@@ -50,7 +50,7 @@ pub use read_view::{CoherentGetResponse, CoherentSearchResponse, CoherentSimilar
 #[path = "strength.rs"]
 mod strength;
 use strength::StrengthContext;
-pub use strength::StrengthDiagnostics;
+pub use strength::{StrengthDiagnostics, project_strengths};
 
 /// Request-local inputs retained for the coherent payload selector. The caller
 /// reuses the actual validated filters and lifecycle projection, not a second
@@ -1507,7 +1507,7 @@ impl QueryEngine {
             return Ok(());
         }
 
-        let activated = if context.is_some_and(StrengthContext::explicit) {
+        let activated = if context.is_some_and(StrengthContext::projects) {
             self.graph.spreading_activation_canonical(
                 &seeds,
                 namespace_id,

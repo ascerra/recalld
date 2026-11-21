@@ -519,14 +519,9 @@ async fn get_memory_admitted(
             &crate::model::CachedRecord::from(&row.record),
             namespace.name,
         );
-        if row.record.schema.as_ref().is_some_and(|s| {
-            s.lifecycle.lifecycle_version
-                == crate::model::schema::LifecycleVersion::ExplicitFeedbackV2
-        }) {
-            if let Some(projected) = prepared.response {
-                response.strength = projected.strength;
-                response.decay_strength = projected.decay_strength;
-            }
+        if let Some(projected) = prepared.response {
+            response.strength = projected.strength;
+            response.decay_strength = projected.decay_strength;
         }
         response.full_text = row.full_text;
         check_read_admission(&state, admitted_stamp).await?;
