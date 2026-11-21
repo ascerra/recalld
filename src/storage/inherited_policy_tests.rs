@@ -227,7 +227,7 @@ fn inherited_policy_unknown_requires_real_adoption_replay_before_cas_and_restart
     assert_eq!(std::fs::read(path.join("meta.db")).unwrap(), bytes);
 }
 #[test]
-fn inherited_policy_keyed_noop_no_row_churn_and_some_to_none_requires_new_adoption() {
+fn inherited_policy_keyed_noop_no_row_churn_and_some_to_none_binds_current_multiplier() {
     let root = tempfile::tempdir().unwrap();
     let (path, ns, id) = bound_fixture(root.path());
     adopt_inherited_decay(&path, &request(&path, ns, 1., "initial")).unwrap();
@@ -277,27 +277,28 @@ fn inherited_policy_keyed_noop_no_row_churn_and_some_to_none_requires_new_adopti
     owner
         .update_policy(&MutationContext::unkeyed(ns), scope, &policy)
         .unwrap();
-    assert!(
-        owner
-            .engine
-            .get_namespace(ns)
-            .unwrap()
-            .unwrap()
-            .schema
-            .unwrap()
-            .inherited_decay
-            .is_none()
-    );
+    // #237: returning to inheritance binds the owner's configured multiplier
+    // (1.0 here) in the same receipt, so dependent operations keep working.
+    let binding = owner
+        .engine
+        .get_namespace(ns)
+        .unwrap()
+        .unwrap()
+        .schema
+        .unwrap()
+        .inherited_decay
+        .unwrap();
+    assert_eq!(binding.multiplier_bits, 1f32.to_bits());
     assert!(
         owner
             .metadata()
             .capture_feedback(id, Some(ns), 3, &NativePolicyInputs::default())
-            .is_err()
+            .is_ok()
     );
     drop(owner);
-    // Raw inspection/reopen remains available, but only actual adoption unblocks projection.
+    // A later configuration change still needs explicit adoption, from that binding.
     let next = request(&path, ns, 0., "after-clear");
-    assert!(next.preview.prior.is_none());
+    assert_eq!(next.preview.prior, Some(binding));
     adopt_inherited_decay(&path, &next).unwrap();
     assert!(
         session(&path, 0.)

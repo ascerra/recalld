@@ -13,6 +13,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[path = "native_catalog_invalid_tests.rs"]
 mod invalid_tests;
+#[path = "native_policy_patch_tests.rs"]
+mod policy_patch_tests;
 
 pub(crate) struct Provider {
     available: AtomicBool,

@@ -588,7 +588,13 @@ pub(crate) fn validate_policy_history(
                 if binding_changes
                     .entry(*id)
                     .or_default()
-                    .insert(*revision, (t.cleared_inherited_decay.clone(), None))
+                    .insert(
+                        *revision,
+                        (
+                            t.cleared_inherited_decay.clone(),
+                            t.adopted_inherited_decay.clone(),
+                        ),
+                    )
                     .is_some()
                 {
                     return Err(invalid("ambiguous inherited binding change"));
@@ -1142,7 +1148,7 @@ pub(crate) fn validate_policy_history(
                 if t.before.decay_rate_multiplier.is_some()
                     && t.after.decay_rate_multiplier.is_none()
                 {
-                    if ns.schema.as_ref().unwrap().inherited_decay.is_some() {
+                    if ns.schema.as_ref().unwrap().inherited_decay != t.adopted_inherited_decay {
                         return Err(invalid("inherited binding was not cleared"));
                     }
                     ns.schema.as_mut().unwrap().inherited_decay = t.cleared_inherited_decay.clone();

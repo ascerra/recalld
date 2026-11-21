@@ -211,7 +211,7 @@ Migrated namespaces retain `UnknownLegacy` embedding provenance. Compatibility o
 
 ## Available tools
 
-The server exposes 16 tools.
+The server exposes 17 tools.
 
 ### `move_memories`
 
@@ -1030,11 +1030,104 @@ Response:
   "permastoreCount": 3,
   "avgStrength": 0.72,
   "edgeCount": 156,
-  "vectorBytes": 258048
+  "vectorBytes": 258048,
+  "policy": {
+    "initialStability": 3.7145,
+    "defaultDifficulty": 5.0,
+    "desiredRetention": 0.9,
+    "phaseThresholds": {
+      "fullToSummary": 0.7,
+      "summaryToGhost": 0.3,
+      "ghostToDelete": 0.1
+    },
+    "permastoreThreshold": 1500.0,
+    "decayRateMultiplier": null,
+    "effectiveDecayRateMultiplier": 1.0,
+    "daysUntilSummary": 16.48,
+    "daysUntilGhost": 160.12
+  }
 }
 ```
 
 `vectorBytes` is the logical size of the live vector data (`memoryCount` x embedding dimensions x 4). It is not the size of `vectors.dat`, which retains freed slots until compaction.
+
+`policy` is the namespace's decay policy as the sweep applies it. Its first six fields are the stored values, in the shape [`update_namespace_policy`](#update_namespace_policy) accepts; `decayRateMultiplier` is `null` when the namespace inherits the `[decay]` multiplier. The rest are derived:
+
+| Field | Meaning |
+|-------|---------|
+| `effectiveDecayRateMultiplier` | The multiplier the sweep uses: the namespace's own, otherwise the inherited one. `0` disables decay. |
+| `daysUntilSummary` | Days until a memory that is never recalled or reinforced drops to Summary, starting at `initialStability`. `null` when decay is disabled. |
+| `daysUntilGhost` | The same for Ghost. |
+
+Recalling or reinforcing a memory raises its stability, so real memories usually last longer than these figures. Daemons older than 2.2 omit `policy`.
+
+---
+
+### update_namespace_policy
+
+Change how fast memories decay in an existing namespace, `default` included. Give only the fields to change; every other field keeps its current value, and recalld sends the result as one complete replacement. The change applies to every memory in the namespace from the next sweep, recall or reinforcement; nothing is rewritten in bulk.
+
+How long a memory stays in a phase follows from its stability and the phase thresholds, scaled by the multiplier. Check `policy.daysUntilSummary` and `policy.daysUntilGhost` in `namespace_stats` or `list_namespaces` before and after a change.
+
+#### Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `namespace` | string/null | no | session default | Namespace to change |
+| `decayRateMultiplier` | number/null | no | unchanged | Time scale for decay: `1` normal, `2` twice as slow, `0.5` twice as fast, `0` no decay. `null` drops the namespace's own value and inherits the `[decay]` multiplier, recording the current one for the namespace at once. |
+| `initialStability` | number | no | unchanged | Stability, in days, a new memory starts with (built-in `3.7145`). Applies to memories stored after the change. |
+| `phaseThresholds` | object | no | unchanged | Any of `fullToSummary`, `summaryToGhost`, `ghostToDelete`. After the change they must satisfy `0 < ghostToDelete < summaryToGhost < fullToSummary < 1`. |
+| `permastoreThreshold` | number | no | unchanged | Stability, in days, at which a memory becomes permanent (built-in `1500`) |
+| `desiredRetention` | number | no | unchanged | Target retention for FSRS scheduling, 0–1 |
+| `defaultDifficulty` | number | no | unchanged | FSRS difficulty a new memory starts with, 1–10 |
+
+Unknown fields, an empty change and out-of-range values are rejected without writing anything.
+
+#### Example
+
+Request:
+
+```json
+{
+  "namespace": "default",
+  "decayRateMultiplier": 2,
+  "phaseThresholds": { "fullToSummary": 0.8 }
+}
+```
+
+Response (abridged):
+
+```json
+{
+  "contractVersion": 2,
+  "status": "ok",
+  "scope": { "namespaceId": 1, "namespace": "default" },
+  "data": {
+    "namespaceId": 1,
+    "changed": true,
+    "policy": {
+      "initialStability": 3.7145,
+      "defaultDifficulty": 5.0,
+      "phaseThresholds": { "fullToSummary": 0.8, "summaryToGhost": 0.3, "ghostToDelete": 0.1 },
+      "permastoreThreshold": 1500.0,
+      "desiredRetention": 0.9,
+      "decayRateMultiplier": 2.0
+    }
+  },
+  "receipt": {
+    "operationId": "…",
+    "committedGeneration": "42",
+    "outcome": { "kind": "nativeNamespacePolicyUpdated", "before": { "…": "…" }, "after": { "…": "…" } }
+  },
+  "warnings": []
+}
+```
+
+`data.changed` is `false` when the values already matched; nothing is written then and there is no receipt. The receipt's `outcome.before` and `outcome.after` hold the old and new policy. After this change, `namespace_stats` reports `daysUntilSummary` of about 17.8 and `daysUntilGhost` of about 320.
+
+Concurrent changes to the same namespace are last-writer-wins: each call reads the current values when it runs.
+
+Over HTTP the same operation is `PUT /namespaces/{id}/policy` with the header `Recalld-Contract-Version: 2` and a complete `{"policy": {...}}` body; it is the only contract-2 request the server accepts. `recalld-cli namespaces policy` wraps it.
 
 ---
 
@@ -1089,7 +1182,7 @@ Response:
 
 ### list_namespaces
 
-List every memory namespace with its ID, embedding dimensions, live memory count, and creation date. Call this first when you do not know which namespaces exist, before targeting one with `list_memories`, `list_tags`, or `namespace_stats`.
+List every memory namespace with its ID, embedding dimensions, live memory count, creation date and decay `policy` (the same object [`namespace_stats`](#namespace_stats) returns). Call this first when you do not know which namespaces exist, before targeting one with `list_memories`, `list_tags`, or `namespace_stats`.
 
 Counts exclude deleted (tombstoned) memories, so they agree with `list_memories.total` and `namespace_stats.memoryCount` for the same namespace.
 
@@ -1114,7 +1207,8 @@ Response:
     "name": "default",
     "embeddingDim": 1536,
     "memoryCount": 128,
-    "createdAt": "2026-08-11 12:00:00 UTC"
+    "createdAt": "2026-08-11 12:00:00 UTC",
+    "policy": { "decayRateMultiplier": null, "effectiveDecayRateMultiplier": 1.0, "daysUntilSummary": 16.48, "daysUntilGhost": 160.12, "…": "…" }
   }
 ]
 ```

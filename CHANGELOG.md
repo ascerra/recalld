@@ -4,6 +4,7 @@
 
 ### Added
 
+- Change how fast memories decay in an existing namespace, `default` included (#237). The MCP tool `update_namespace_policy` and `recalld-cli namespaces policy NAME` take only the settings to change (multiplier, initial stability, phase thresholds, permastore threshold) and keep the rest; over HTTP, `PUT /namespaces/{id}/policy` now accepts contract 2, the only request that does. `namespace_stats` and `list_namespaces` report each namespace's `policy`, including the multiplier the sweep uses and `daysUntilSummary`/`daysUntilGhost` for a memory that is never recalled. Returning a namespace to the inherited multiplier now records the current `[decay]` value for it at once, instead of leaving operations blocked until an offline adoption.
 - Single-namespace mode for MCP: `[namespaces] mode = "single"` (or `RECALLD_NAMESPACES_MODE=single`) keeps every agent's memories in `default`. Agents are not told to choose or create namespaces, `create_namespace`, `delete_namespace` and `move_memories` are hidden, and a namespace other than `default` is rejected. The default, `"multi"`, is unchanged; the HTTP API and CLI are unaffected.
 
 ### Local web UI

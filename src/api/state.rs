@@ -765,6 +765,12 @@ pub trait NamespaceRegistry: Send + Sync {
         Err(crate::native_catalog_adapter::CatalogError::Unavailable)
     }
 
+    /// The inherited multiplier and planner inputs the sweep resolves
+    /// namespace policy with; `None` when this registry does not know them.
+    fn policy_inputs(&self) -> Option<crate::storage::native_lifecycle::NativePolicyInputs> {
+        None
+    }
+
     /// Resolve a namespace by name, returning its config if found.
     fn resolve(&self, name: &str) -> Option<NamespaceConfig>;
 
