@@ -1140,9 +1140,20 @@ async fn native_reopen_decodes_each_receipt_once_and_reads_skip_history() {
     use crate::serialization::list::ListPageRequest;
     use crate::storage::control;
     let (f, _) = setup_memories(4);
-    for hour in 1..=2 {
+    let count = |f: &Fixture| {
+        let engine = f.storage.read().unwrap();
+        let read = engine.meta_store().db.begin_read().unwrap();
+        read.open_table(crate::storage::control::RECEIPTS)
+            .unwrap()
+            .len()
+            .unwrap() as usize
+    };
+    let before = count(&f);
+    // Passes that cross phases (Full -> Summary -> Ghost), so they commit
+    // history whether or not sweeps also write strength-only refreshes.
+    for days in [20, 200] {
         completion(&f).rebuild_all().await.unwrap();
-        let r = pass(&f, 3000 + hour * DAY / 24).await;
+        let r = pass(&f, 3000 + days * DAY).await;
         assert!(
             r.errors.is_empty() && r.publication_error.is_none(),
             "{r:?}"
@@ -1157,7 +1168,7 @@ async fn native_reopen_decodes_each_receipt_once_and_reads_skip_history() {
         let read = engine.meta_store().db.begin_read().unwrap();
         read.open_table(control::RECEIPTS).unwrap().len().unwrap() as usize
     };
-    assert!(receipts > 12, "{receipts}");
+    assert!(receipts > before, "{before} -> {receipts}");
     // Once on the disposable preflight copy, once on the opened real file.
     assert_eq!(work.full_validations, 2, "{work:?}");
     assert_eq!(work.receipt_decodes, receipts, "{work:?}");
