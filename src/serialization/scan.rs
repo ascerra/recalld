@@ -410,10 +410,7 @@ mod tests {
             assert!(schema["properties"].get(field).is_none());
         }
         for tool in crate::mcp::tools::tool_definitions() {
-            assert_eq!(
-                tool.input_schema["properties"]["contractVersion"]["enum"],
-                json!([1])
-            );
+            assert!(tool.input_schema["properties"]["contractVersion"].is_null());
         }
     }
 }

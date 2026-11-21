@@ -209,6 +209,13 @@ impl MetadataStore {
         )?;
         match plan(&before, &evidence, intent.sampled_at)? {
             PlannedDecay::Skipped(reason) => Ok(NativeDecayResult::Skipped(reason)),
+            // Strength is recomputed at read time from stability, the decay anchor
+            // and policy, so a pass commits (and keeps a receipt) only for a phase
+            // change (#239). `plan` still refreshes strength: retained receipts
+            // that did so validate against it.
+            PlannedDecay::Phase(after) if after.lifecycle.phase == before.lifecycle.phase => {
+                Ok(NativeDecayResult::Skipped(NativeDecaySkip::Unchanged))
+            }
             PlannedDecay::Phase(after) => {
                 let transition = NativePhaseWrite {
                     namespace_id: ns.id,

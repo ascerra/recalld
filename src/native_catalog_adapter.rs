@@ -29,6 +29,9 @@ pub struct NativeCatalogAdapter {
     pub(crate) failure: Option<&'static str>,
 }
 impl NativeCatalogAdapter {
+    pub(crate) fn policy(&self) -> &NativePolicyInputs {
+        &self.policy
+    }
     /// Fresh, unkeyed API1 only. Keyed V2 replay retains its existing entry.
     pub(crate) async fn create_api1_bounded(
         &self,

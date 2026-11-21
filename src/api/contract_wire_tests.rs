@@ -224,10 +224,7 @@ async fn contract_mcp_guards_every_tool_and_generic_dispatch_without_backend_wor
     let generation = f.storage.read().unwrap().control_state().unwrap();
     let panic_bridge = StubBridge::default().into_bridge();
     for tool in crate::mcp::tools::tool_definitions() {
-        assert_eq!(
-            tool.input_schema["properties"]["contractVersion"]["enum"],
-            json!([1])
-        );
+        assert!(tool.input_schema["properties"]["contractVersion"].is_null());
         for selector in [
             json!(2),
             json!(3),

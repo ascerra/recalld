@@ -1287,6 +1287,8 @@ If startup cannot adopt the new value for a namespace (for example, a namespace 
 sweep_interval_hours = 6.0
 ```
 
+A sweep writes a memory only when it changes phase or is removed. The strength that recall, `minStrength`, `get_memory` and `namespace_stats` report is computed from the memory's stability and last access when you read it.
+
 **Phase thresholds and permastore** are set per namespace. The global `[decay.phase_thresholds]` and `permastore_threshold_days` settings are deprecated and have no effect.
 
 ### Changing a namespace's decay

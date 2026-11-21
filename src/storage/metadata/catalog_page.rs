@@ -44,7 +44,13 @@ impl MetadataStore {
         if cursor.is_some_and(|c| c.at != state.generation_ref()) {
             return Err(CatalogError::Stale);
         }
-        let schema = crate::storage::canonical_schema::read_state(&tx, &state)?;
+        // Native history was fully validated by owned reopen; native_control_at
+        // already required that validation at this exact generation.
+        let schema = if self.native_lifecycle_only {
+            Some(self.owned_schema_at(&tx, state.generation_ref())?)
+        } else {
+            crate::storage::canonical_schema::read_state(&tx, &state)?
+        };
         let table = tx.open_table(NAMESPACE_TABLE).map_err(StorageError::from)?;
         let mut namespaces = BTreeMap::new();
         let mut catalog_bytes = 0usize;

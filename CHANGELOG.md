@@ -2,11 +2,6 @@
 
 ## Unreleased
 
-### Changed
-
-- New namespaces, including `default` on a new store, use the explicit-feedback lifecycle: a recall records that it returned a memory but no longer restarts its decay clock, and only `reinforce_memory` makes a memory last longer. A memory that keeps being recalled but is never reinforced now fades instead of staying at full strength. Existing namespaces keep their lifecycle until migrated with `recalld lifecycle migrate`. The `reinforce_memory` description now says that it, not recall, strengthens a memory.
-- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
-
 ### Added
 
 - `recalld lifecycle preview` and `recalld lifecycle migrate --destination DIR` (each with `--namespace NAME` or `--all`) move existing namespaces to the explicit-feedback lifecycle. With the daemon stopped, `preview` shows how many memories the next decay sweep moves to Summary or Ghost or deletes; `migrate` writes a validated, migrated copy of the store to a new directory, leaving the store unchanged, and prints how to swap it in. See "Moving to explicit feedback" in docs/guide.md. The raw `recalld lifecycle --source --request` form still works.
@@ -27,10 +22,19 @@
 - `get_memory` and the web UI's memory view now return memories that older releases left in the Summary phase with their full text, or in the Ghost phase with tags, instead of failing with "Prepared remote response is unavailable" after an upgrade. The record is returned as stored. When a daemon reply is still rejected, the error message and the MCP or UI process log name the failed check. (#231)
 - Recall collapses a whole `supersedes` chain to its newest version that the query may return. When the newest version could not be returned (deleted, a ghost the query did not ask for, or excluded by a filter), every older version came back instead, often side by side; now the next newest takes its place. A superseded memory is still available by ID.
 - docs/architecture.md gave the default decay timeline as about 36 days to Summary and 280 to Ghost; the formula gives about 16.5 and 160 (and about 6,300 days to removal, not 13,300). (#234)
+- A decay sweep wrote every memory on every pass, because strength changes a little each time, and each write keeps a receipt in `meta.db` for the life of the store: about 5 MB and 5 s of daemon start time per sweep on a 1,200-memory store. A sweep now writes a memory only when it changes phase or is removed. Strength is computed when it is read: recall and its `minStrength` filter, `get_memory`, `namespace_stats` and the HTTP API report the strength at the time of the request, as namespaces migrated to explicit feedback already did, instead of the value stored at the last write (while the relationship graph is being rebuilt, `get_memory` on a namespace that hasn't been migrated to explicit feedback leaves out the connection bonus instead of failing). Phase changes still happen on time, since the sweep decides them from computed strength. Part of #239.
+- Daemon start no longer gets several seconds slower after every decay sweep. Startup checked the stored operation history about ten times, decoding each retained record about 190 times; it now checks it once on a copy and once on the opened store, and decodes each record once. Every check still runs, and the same stores are accepted or refused. Listing memories and reading the namespace and tag catalogs no longer recheck that history on each call. The store still grows with each sweep. (part of #239)
 
 ### Deprecated
 
 - `[decay.phase_thresholds]` and `decay.permastore_threshold_days` (and `RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`, `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS`) never had an effect: thresholds are set per namespace. They are still accepted, startup logs a `WARN` when they differ from the defaults, and they are gone from the sample config and the guide. (#233)
+
+### Changed
+
+- New namespaces, including `default` on a new store, use the explicit-feedback lifecycle: a recall records that it returned a memory but no longer restarts its decay clock, and only `reinforce_memory` makes a memory last longer. A memory that keeps being recalled but is never reinforced now fades instead of staying at full strength. Existing namespaces keep their lifecycle until migrated with `recalld lifecycle migrate`. The `reinforce_memory` description now says that it, not recall, strengthens a memory.
+- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
+- MCP tools no longer advertise `contractVersion`, and `store_memories`/`forget_memories` no longer advertise `batchResultVersion`; the server instructions and recovery hints drop their contract-version wording. Only version 1 exists for agents, so the labels only caused confusion. Older clients may still send `contractVersion: 1` or `batchResultVersion: 1`, and other values are refused as before. HTTP contract selection is unchanged.
+- Memory is used silently: recalld's instructions and the documented prompt and hook templates tell agents not to report memory stores, recalls or status to the user, and to mention remembered facts only when they matter to the answer.
 
 ## 2.1.2 — 2026-11-20
 

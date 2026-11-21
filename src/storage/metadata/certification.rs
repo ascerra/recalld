@@ -107,27 +107,43 @@ impl OwnedVectorValidation {
         Ok(())
     }
 }
+impl OwnedVectorValidation {
+    /// `validated` is `control::validate_existing_with_schema` on this same
+    /// transaction, so the captured G is exactly the validated snapshot.
+    pub(super) fn capture(
+        read: &redb::ReadTransaction,
+        validated: (
+            Option<ControlState>,
+            Option<crate::storage::canonical_schema::CanonicalSchemaState>,
+        ),
+    ) -> Result<Self, StorageError> {
+        let (state, schema) = validated;
+        let state =
+            state.ok_or_else(|| StorageError::InvalidControl("native control missing".into()))?;
+        let (summary, pending_bindings) =
+            crate::storage::vector_certification::validate_current_with_pending(read, &state)?;
+        let schema =
+            schema.ok_or_else(|| StorageError::InvalidControl("native schema missing".into()))?;
+        Ok(Self {
+            at: state.generation_ref(),
+            schema,
+            namespaces: summary.selected,
+            pending_bindings,
+        })
+    }
+}
 impl MetadataStore {
     pub(super) fn initialize_vector_validation(&self) -> Result<(), StorageError> {
         // Constructor preflight already validated canonical history and payloads
         // under stable engine ownership. Capture its exact live canonical G.
         let read = self.db.begin_read()?;
-        let state = control::validate_existing(&read)?
-            .ok_or_else(|| StorageError::InvalidControl("native control missing".into()))?;
-        let (summary, pending_bindings) =
-            crate::storage::vector_certification::validate_current_with_pending(&read, &state)?;
-        let schema = crate::storage::canonical_schema::read_state(&read, &state)?
-            .ok_or_else(|| StorageError::InvalidControl("native schema missing".into()))?;
+        let owned =
+            OwnedVectorValidation::capture(&read, control::validate_existing_with_schema(&read)?)?;
         *self
             .vector_validation
             .write()
             .map_err(|_| StorageError::RecoveryRequired("vector validation poisoned".into()))? =
-            Some(OwnedVectorValidation {
-                at: state.generation_ref(),
-                schema,
-                namespaces: summary.selected,
-                pending_bindings,
-            });
+            Some(owned);
         Ok(())
     }
 

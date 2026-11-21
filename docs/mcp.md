@@ -1390,6 +1390,10 @@ preferences, feedback, and context when useful, not every turn. Avoid ephemeral
 task details, facts derivable from source, duplicate copies across stores, and
 namespaces per agent or session.
 
+Use memory silently. Don't tell the user that you stored, reinforced, recalled or
+checked memories, and don't report memory status at the end of a task. Mention
+something you remembered only when it matters to the answer.
+
 Write specific, searchable summaries with canonical `entities`, a few `topics`,
 and meaningful `tags`. Use same-namespace `supersedes` for a real correction.
 Reinforce only after deliberately judging usefulness; don't delete a memory
@@ -1421,6 +1425,10 @@ explicitly; don't search every unrelated namespace. Store durable decisions,
 preferences, feedback, and context when useful, not every turn. Avoid ephemeral
 task details, facts derivable from source, duplicate copies across stores, and
 namespaces per agent or session.
+
+Use memory silently. Don't tell the user that you stored, reinforced, recalled or
+checked memories, and don't report memory status at the end of a task. Mention
+something you remembered only when it matters to the answer.
 
 Write specific, searchable summaries with canonical `entities`, a few `topics`,
 and meaningful `tags`. Use same-namespace `supersedes` for a real correction.
@@ -1484,7 +1492,7 @@ Add to your `~/.claude/settings.json` (or project `.claude/settings.json`):
         "hooks": [
           {
             "type": "command",
-            "command": "printf '%s\\n' '{\"hookSpecificOutput\": {\"hookEventName\": \"SubagentStart\", \"additionalContext\": \"recalld memory is available. Before starting, recall relevant context from default and the project namespace for this repository (find it with list_namespaces). Before finishing, store durable decisions, gotchas or user preferences you learned that are not already in the code, PRs or issues; skip routine task details. Always pass an explicit namespace.\"}}'"
+            "command": "printf '%s\\n' '{\"hookSpecificOutput\": {\"hookEventName\": \"SubagentStart\", \"additionalContext\": \"recalld memory is available. Before starting, recall relevant context from default and the project namespace for this repository (find it with list_namespaces). Before finishing, store durable decisions, gotchas or user preferences you learned that are not already in the code, PRs or issues; skip routine task details. Always pass an explicit namespace. Do this silently: do not mention memory operations in your report.\"}}'"
           }
         ]
       }
@@ -1541,9 +1549,10 @@ If you find memories disappearing too quickly or persisting too long, adjust `de
 
 ## Application contract selection
 
-Tools currently support application contract version 1. Omit `contractVersion`
-or supply the integer `1`; explicit `2` and malformed selectors fail before
-handler work. This is separate from MCP transport protocol negotiation. Legacy
+Tool schemas do not list a contract version; every tool uses application
+contract 1. Older clients may still send `contractVersion: 1` (or
+`batchResultVersion: 1` on batch tools) and keep working; `2` and malformed
+selectors fail before handler work. This is separate from MCP transport protocol negotiation. Legacy
 success payloads remain unchanged, including unknown-field compatibility and
 missing arguments on no-argument tools. Modern object results also carry the
 same JSON in `structuredContent`; legacy-era results and array/scalar payloads
