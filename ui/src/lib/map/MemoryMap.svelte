@@ -19,7 +19,7 @@
   import LayoutWorker from './layout.worker.ts?worker';
   import { LightLayer, affine } from './light';
   import { choreograph, type Choreo } from './choreo';
-  import { rgb, alpha } from './theme';
+  import { rgb, alpha, solid } from './theme';
   import { live, type Received } from '$lib/live.svelte';
 
   let {
@@ -365,7 +365,7 @@
   function flash(id: string) {
     if (!graph?.hasNode(id)) return;
     flashUntil.set(id, performance.now() + FLASH_MS);
-    graph.setNodeAttribute(id, 'color', alpha(theme.nodeLit, 0.95));
+    graph.setNodeAttribute(id, 'color', solid(theme.canvas, theme.nodeLit, 0.95));
     sigma?.refresh({ skipIndexation: true });
     setTimeout(() => {
       if (!graph?.hasNode(id) || (flashUntil.get(id) ?? 0) > performance.now()) return;
@@ -790,12 +790,16 @@
             {
               x: (a: SwayNode, st: Faded, gs: SwayState) => a.x + swayOffset(a, st, gs, 0),
               y: (a: SwayNode, st: Faded, gs: SwayState) => a.y + swayOffset(a, st, gs, 1),
-              color: { attribute: 'color' },
+              // Nodes are always solid so links never show through them. Fading
+              // (outside a selected memory's neighborhood, or during a recall)
+              // is a lighter shade blended toward the canvas, not transparency.
+              color: (a: { color: string }, st: Faded, gs: FadeState) => {
+                const f = fadeOf(st, gs, 0.3, 0.22);
+                return f >= 1 || !a.color.startsWith('#') ? a.color : solid(theme.canvas, a.color, f);
+              },
               size: { attribute: 'size' },
               visibility: { attribute: 'visibility' },
               labelVisibility: 'hidden',
-              // While a memory is hovered, everything outside its neighborhood fades.
-              opacity: (_a: unknown, st: Faded, gs: FadeState) => fadeOf(st, gs, 0.3, 0.22),
             },
           ],
           edges: [

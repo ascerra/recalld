@@ -13,6 +13,7 @@
 
 ### Local web UI
 
+- Memories on the map are always solid, with stage and fading shown as lighter shades instead of transparency, so links no longer show through nodes.
 - Decay forecasts use the namespace's effective decay multiplier (its own, else the global one), as the decay sweep does: Explore's strength and **Next change**, the memory panel's decay curve, the Health forecast and at-risk list, and the map's Decay scrubber previously assumed a multiplier of 1. (#235)
 - The namespace menu in search (⌘K) opens above the search popup instead of behind it. Search starts from the page's namespace (All when none is set) and changing it there filters only the search, not every page.
 
