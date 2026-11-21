@@ -10,6 +10,8 @@
 
 ### Local web UI
 
+- Selecting a memory on the map opens the same card as an opened Explore row, popping up at the bottom of the map instead of a side panel. Esc or its close button dismisses it, and the selected memory stays in view above it.
+- Memories on the map are always solid, with stage and fading shown as lighter shades instead of transparency, so links no longer show through nodes.
 - Decay forecasts use the namespace's effective decay multiplier (its own, else the global one), as the decay sweep does: Explore's strength and **Next change**, the memory panel's decay curve, the Health forecast and at-risk list, and the map's Decay scrubber previously assumed a multiplier of 1. (#235)
 - The namespace menu in search (⌘K) opens above the search popup instead of behind it. Search starts from the page's namespace (All when none is set) and changing it there filters only the search, not every page.
 
@@ -31,8 +33,8 @@
 
 ### Changed
 
-- New namespaces, including `default` on a new store, use the explicit-feedback lifecycle: a recall records that it returned a memory but no longer restarts its decay clock, and only `reinforce_memory` makes a memory last longer. A memory that keeps being recalled but is never reinforced now fades instead of staying at full strength. Existing namespaces keep their lifecycle until migrated with `recalld lifecycle migrate`. The `reinforce_memory` description now says that it, not recall, strengthens a memory.
 - MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
+- New namespaces, including `default` on a new store, use the explicit-feedback lifecycle: a recall records that it returned a memory but no longer restarts its decay clock, and only `reinforce_memory` makes a memory last longer. A memory that keeps being recalled but is never reinforced now fades instead of staying at full strength. Existing namespaces keep their lifecycle until migrated with `recalld lifecycle migrate`. The `reinforce_memory` description now says that it, not recall, strengthens a memory.
 - MCP tools no longer advertise `contractVersion`, and `store_memories`/`forget_memories` no longer advertise `batchResultVersion`; the server instructions and recovery hints drop their contract-version wording. Only version 1 exists for agents, so the labels only caused confusion. Older clients may still send `contractVersion: 1` or `batchResultVersion: 1`, and other values are refused as before. HTTP contract selection is unchanged.
 - Memory is used silently: recalld's instructions and the documented prompt and hook templates tell agents not to report memory stores, recalls or status to the user, and to mention remembered facts only when they matter to the answer.
 

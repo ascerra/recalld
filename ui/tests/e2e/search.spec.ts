@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { open } from '../support/ui';
+import { centrePixel } from '../support/pixel';
 
 test('⌘K searches with recalld’s hybrid search and explains the top result', async ({ page }) => {
   await open(page, '/map');
@@ -15,9 +16,34 @@ test('⌘K searches with recalld’s hybrid search and explains the top result',
   // Opening a result keeps you where you are: on the map it is selected there.
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/map\?id=/);
-  await expect(page.getByRole('complementary', { name: 'Selected memory' }).getByRole('heading')).toHaveText(
+  await expect(page.getByRole('region', { name: 'Memory details' }).getByRole('heading')).toHaveText(
     'Connection bonus keeps well-linked memories in Full',
   );
+  // The selected memory stays visible above the card and is drawn solid:
+  // sample the pixel at its centre (a plain screenshot, as a user sees it).
+  await page.waitForFunction(() => (window as unknown as { __recalldSettled?: boolean }).__recalldSettled === true, null, { timeout: 60_000 });
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(1500);
+  const id = new URL(page.url()).searchParams.get('id')!;
+  const at = await page.evaluate((id) => {
+    const hooks = window as unknown as { __recalldPositions: () => { id: string; x: number; y: number }[] };
+    const p = hooks.__recalldPositions().find((n) => n.id === id)!;
+    const box = document.querySelector('canvas.sigma-stage')!.getBoundingClientRect();
+    return { x: Math.round(box.left + p.x), y: Math.round(box.top + p.y) };
+  }, id);
+  const card = await page.locator('.memory-card').boundingBox();
+  expect(at.y).toBeLessThan(card!.y);
+  const png = await page.screenshot({ clip: { x: at.x - 1, y: at.y - 1, width: 3, height: 3 } });
+  const [r, g, b] = centrePixel(png);
+  expect(r + g + b).toBeLessThan(300);
+  // The card at the bottom of the map dismisses with Esc or its close button.
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('region', { name: 'Memory details' })).toBeHidden();
+  // Reloading the ?id= link selects it again.
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Memory details' })).toBeVisible();
+  await page.getByRole('region', { name: 'Memory details' }).getByRole('button', { name: 'Close details' }).click();
+  await expect(page.getByRole('region', { name: 'Memory details' })).toBeHidden();
 });
 
 test('a result opened from Explore stays in Explore', async ({ page }) => {

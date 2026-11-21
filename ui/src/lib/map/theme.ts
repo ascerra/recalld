@@ -15,6 +15,8 @@ export interface MapTheme {
   suppressed: string;
   halo: string;
   canvasDot: string;
+  /** The map's background: node colors are blended onto it so nodes are solid. */
+  canvas: string;
   moss: string;
   agents: string[];
   fontSans: string;
@@ -37,6 +39,7 @@ export function readTheme(): MapTheme {
     suppressed: css('--color-suppressed'),
     halo: css('--color-label-halo'),
     canvasDot: css('--color-canvas-dot'),
+    canvas: css('--color-canvas'),
     moss: css('--color-agent-2'),
     agents: [1, 2, 3, 4].map((i) => css(`--color-agent-${i}`)),
     fontSans: css('--font-sans'),
@@ -48,6 +51,12 @@ export function mix(a: string, b: string, t: number): string {
   const p = parseInt(a.slice(1), 16), q = parseInt(b.slice(1), 16), k = Math.min(1, Math.max(0, t));
   const ch = (s: number) => Math.round(((p >> s) & 255) + (((q >> s) & 255) - ((p >> s) & 255)) * k);
   return '#' + [16, 8, 0].map((s) => ch(s).toString(16).padStart(2, '0')).join('');
+}
+
+/** `color` at opacity `a` as it looks over `ground`, but fully opaque, so
+ *  nothing drawn underneath (links) shows through. */
+export function solid(ground: string, color: string, a: number): string {
+  return mix(ground, color, a);
 }
 
 /** `#RRGGBB` + alpha → `rgba(r, g, b, a)`. */

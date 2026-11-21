@@ -19,7 +19,7 @@
   import LayoutWorker from './layout.worker.ts?worker';
   import { LightLayer, affine } from './light';
   import { choreograph, type Choreo } from './choreo';
-  import { rgb, alpha } from './theme';
+  import { rgb, alpha, solid } from './theme';
   import { live, type Received } from '$lib/live.svelte';
 
   let {
@@ -365,7 +365,7 @@
   function flash(id: string) {
     if (!graph?.hasNode(id)) return;
     flashUntil.set(id, performance.now() + FLASH_MS);
-    graph.setNodeAttribute(id, 'color', alpha(theme.nodeLit, 0.95));
+    graph.setNodeAttribute(id, 'color', solid(theme.canvas, theme.nodeLit, 0.95));
     sigma?.refresh({ skipIndexation: true });
     setTimeout(() => {
       if (!graph?.hasNode(id) || (flashUntil.get(id) ?? 0) > performance.now()) return;
@@ -584,10 +584,41 @@
     const cam = sigma!.viewportToFramedGraph(c);
     sigma!.getCamera().animate({ x: cam.x, y: cam.y, ratio: Math.max(0.15, Math.min(1, pts.length / 120)) }, { duration: 300 });
   }
-  export function center(id: string) {
+  /** A full redraw, as a container resize does. Camera moves while the memory
+   *  card is open could leave parts of the WebGL frame stale otherwise. */
+  export function redraw() {
+    redrawAll();
+  }
+  const redrawAll = () => {
+    if (!sigma) return;
+    sigma.resize();
+    sigma.refresh();
+  };
+
+  /** Center `id`, zooming in a little. `covered` px at the bottom are hidden
+   *  (by the memory card), so it centers in the visible area above them. */
+  export function center(id: string, covered = 0) {
     if (!graph?.hasNode(id) || !sigma) return;
-    const p = sigma.viewportToFramedGraph(sigma.graphToViewport(graph.getNodeAttributes(id) as { x: number; y: number }));
-    sigma.getCamera().animate({ x: p.x, y: p.y, ratio: Math.min(sigma.getCamera().getState().ratio, 0.5) }, { duration: 300 });
+    const cam = sigma.getCamera().getState();
+    const ratio = Math.min(cam.ratio, 0.5);
+    const v = sigma.graphToViewport(graph.getNodeAttributes(id) as { x: number; y: number });
+    // Shift the camera down by half the covered height, measured at the new zoom.
+    const shift = (sigma.viewportToFramedGraph({ x: 0, y: covered / 2 }).y - sigma.viewportToFramedGraph({ x: 0, y: 0 }).y) * (ratio / cam.ratio);
+    const p = sigma.viewportToFramedGraph(v);
+    // Redraw once the move ends: overlapping camera animations could leave the
+    // WebGL frame a step behind the label overlay.
+    void sigma.getCamera().animate({ x: p.x, y: p.y + shift, ratio }, { duration: 300 }).then(redrawAll);
+  }
+
+  /** Pan just enough that `id` isn't under the bottom `covered` px. */
+  export function reveal(id: string, covered: number) {
+    if (!graph?.hasNode(id) || !sigma || covered <= 0) return;
+    const v = sigma.graphToViewport(drawn(id));
+    const limit = container.clientHeight - covered - 48;
+    if (v.y <= limit) return;
+    const cam = sigma.getCamera().getState();
+    const a = sigma.viewportToFramedGraph({ x: 0, y: v.y }), b = sigma.viewportToFramedGraph({ x: 0, y: limit });
+    void sigma.getCamera().animate({ x: cam.x, y: cam.y + (a.y - b.y) }, { duration: 300 }).then(redrawAll);
   }
   export function getSigma() {
     return sigma;
@@ -790,12 +821,16 @@
             {
               x: (a: SwayNode, st: Faded, gs: SwayState) => a.x + swayOffset(a, st, gs, 0),
               y: (a: SwayNode, st: Faded, gs: SwayState) => a.y + swayOffset(a, st, gs, 1),
-              color: { attribute: 'color' },
+              // Nodes are always solid so links never show through them. Fading
+              // (outside a selected memory's neighborhood, or during a recall)
+              // is a lighter shade blended toward the canvas, not transparency.
+              color: (a: { color: string }, st: Faded, gs: FadeState) => {
+                const f = fadeOf(st, gs, 0.3, 0.22);
+                return f >= 1 || !a.color.startsWith('#') ? a.color : solid(theme.canvas, a.color, f);
+              },
               size: { attribute: 'size' },
               visibility: { attribute: 'visibility' },
               labelVisibility: 'hidden',
-              // While a memory is hovered, everything outside its neighborhood fades.
-              opacity: (_a: unknown, st: Faded, gs: FadeState) => fadeOf(st, gs, 0.3, 0.22),
             },
           ],
           edges: [

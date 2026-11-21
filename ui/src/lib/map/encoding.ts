@@ -1,6 +1,6 @@
 // DESIGN §6 visual encoding, as graphology attributes for sigma.
 import type { MapTheme } from './theme';
-import { alpha, mix } from './theme';
+import { alpha, mix, solid } from './theme';
 import { displaySize } from './protocol';
 
 export const EDGE = { parent: 1, associative: 2, causal: 3, contradicts: 4, entity: 5, temporal: 6, supersedes: 7 } as const;
@@ -18,15 +18,15 @@ export function nodeAttributes(theme: MapTheme, phase: number, degree: number, p
     case 1: {
       // Full: R 1 → 0.7 runs deep forest → moss, solid → slightly see-through.
       const t = (1 - r) / 0.3;
-      return { size, color: alpha(mix(theme.node, theme.nodeFading, t), 0.94 - 0.2 * Math.min(1, t)), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
+      return { size, color: solid(theme.canvas, mix(theme.node, theme.nodeFading, t), 0.94 - 0.2 * Math.min(1, t)), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
     }
     case 2: {
       // Summary: R 0.7 → 0.3 runs moss → pale sage, and fades further.
       const t = (0.7 - r) / 0.4;
-      return { size, color: alpha(mix(theme.nodeFading, theme.nodeSummary, t), 0.62 - 0.22 * Math.min(1, Math.max(0, t))), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
+      return { size, color: solid(theme.canvas, mix(theme.nodeFading, theme.nodeSummary, t), 0.62 - 0.22 * Math.min(1, Math.max(0, t))), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
     }
     case 3:
-      return { size, color: alpha(theme.nodeGhost, 0.08), ring: alpha(theme.nodeGhost, 0.6), visibility: 'visible' as const, permastore };
+      return { size, color: solid(theme.canvas, theme.nodeGhost, 0.08), ring: alpha(theme.nodeGhost, 0.6), visibility: 'visible' as const, permastore };
     default:
       // Tombstones and memories the decay projection deletes.
       return { size: 1.6, color: alpha(theme.nodeGhost, 0.35), ring: alpha(theme.node, 0), visibility: 'hidden' as const, permastore: false };
