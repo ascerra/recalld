@@ -83,12 +83,10 @@ outputs zero or more structured memories to store.
 - `entities` (required): people, places, proper nouns
 - `topics` (required): 1--5 topic keywords
 - `emotions` (optional): emotional tone
-- `supersedes` (optional): ID of a memory this one replaces. Over the MCP
-  and HTTP APIs the target must already exist and live in the same
-  namespace, or the store is rejected outright. The benchmark harness writes
-  through its own in-process path rather than those APIs, so an ID the model
-  invents is dropped rather than rejected — the memory is still stored, just
-  without the link.
+- `supersedes` (optional): ID of a memory this one replaces. The target must
+  already exist and live in the same namespace, or `store_memory` rejects the
+  store. The harness then retries once without the link, as an agent would,
+  so the memory is still stored.
 
 **Storage pipeline per memory:**
 1. Generate embedding from concatenation of summary + full_text + tags
@@ -109,10 +107,21 @@ outputs zero or more structured memories to store.
 - **Temporal**: links memories within a time window (default 1 hour), up to 20
   links per memory
 
-The memory **storage pipeline** (embedding, indexing, graph linking) is the
-**same as production**. Memory extraction from conversation turns via the LLM
-(`process_turn`) is benchmark-specific -- in production, the calling LLM client
-directly invokes `store_memory` with already-decided content.
+The harness stores every memory by calling the public MCP `store_memory` tool
+in process, the same path an agent uses, so the **storage pipeline**
+(validation, embedding, indexing, graph linking) is **production's**. A replay
+clock is set to each turn's conversation time before the store, so memories
+carry the conversation's dates. Memory extraction from conversation turns via
+the LLM (`process_turn`) is benchmark-specific -- in production, the calling
+LLM client decides what to store.
+
+The harness reacts to tool errors the way an agent would:
+- Labels outside `[A-Za-z0-9/_.:-]` (for example topics containing spaces) are
+  rejected by the tool; the harness retries once with spaces turned into
+  hyphens and other characters dropped.
+- A transient, uncommitted `STORAGE_UNAVAILABLE` is retried up to 3 times.
+- Any store still rejected is skipped and logged as `store rejected`; the
+  conversation continues.
 
 ### 2.2 Retrieval
 
@@ -123,6 +132,7 @@ directly invokes `store_memory` with already-decided content.
 | max_tokens      | 1024 |
 | Default top_k   | 15 (configurable via `--top-k`) |
 | Default graph depth | 2 (LLM can set 0--3 per query) |
+| Access recording | Off (searches don't update memory access history) |
 
 Retrieval uses an LLM call to decompose the question into structured search
 parameters before searching. The `construct_search_query` method takes the
@@ -361,7 +371,9 @@ from the summary.
 
 - Rust toolchain (see `rust-toolchain.toml`)
 - One of the following LLM backends (checked in priority order):
-  - **OpenAI-compatible**: `--llm-url http://host:port`
+  - **OpenAI-compatible**: `--llm-url http://host:port`. Set
+    `BENCH_LLM_API_KEY` to send it as a bearer token (for keyed servers or
+    proxies, e.g. LiteLLM in front of Amazon Bedrock).
   - **Gemini on Vertex AI**: `GEMINI_VERTEX_PROJECT_ID` + gcloud auth.
     Optional: `GEMINI_VERTEX_REGION` (default: `us-central1`).
     Requires `--model gemini-*` / `--ingest-model gemini-*` / `--judge-model gemini-*`

@@ -307,7 +307,30 @@ fn parse_dataset(path: &Path) -> Result<Vec<Conversation>, Box<dyn std::error::E
 
 pub(super) struct BenchHarness {
     pub(super) system: Recalld,
+    /// Replay clock, advanced to each conversation turn's time before a store.
+    clock: std::sync::Arc<crate::time::ManualClock>,
+    /// The same MCP bridge agents use; ingestion goes through its store_memory tool.
+    bridge: crate::mcp::bridge::McpBridge,
     _temp_dir: Option<tempfile::TempDir>,
+}
+
+/// Replay clock start (2020-01-01), before every LoCoMo session date.
+const BENCH_CLOCK_START_MS: i64 = 1_577_836_800_000;
+
+async fn bench_system(
+    config: RecalldConfig,
+) -> Result<
+    (
+        Recalld,
+        std::sync::Arc<crate::time::ManualClock>,
+        crate::mcp::bridge::McpBridge,
+    ),
+    Box<dyn std::error::Error>,
+> {
+    let clock = std::sync::Arc::new(crate::time::ManualClock::new(BENCH_CLOCK_START_MS));
+    let system = Recalld::with_clock(config, clock.clone()).await?;
+    let bridge = crate::mcp::bridge_adapters::direct_bridge(&system, "default".to_string());
+    Ok((system, clock, bridge))
 }
 
 impl BenchHarness {
@@ -325,10 +348,12 @@ impl BenchHarness {
         config.decay.sweep_interval_hours = 999_999.0;
         config.decay.disable_sweep = true;
 
-        let system = Recalld::new(config).await?;
+        let (system, clock, bridge) = bench_system(config).await?;
 
         Ok(Self {
             system,
+            clock,
+            bridge,
             _temp_dir: Some(temp_dir),
         })
     }
@@ -345,9 +370,11 @@ impl BenchHarness {
             .to_string();
         config.decay.sweep_interval_hours = 999_999.0;
         config.decay.disable_sweep = true;
-        let system = Recalld::new(config).await?;
+        let (system, clock, bridge) = bench_system(config).await?;
         Ok(Self {
             system,
+            clock,
+            bridge,
             _temp_dir: None,
         })
     }
@@ -1236,145 +1263,146 @@ pub(super) async fn store_single_memory(
     tag_strings: &[String],
     llm_entities: &[String],
     timestamp_ms: i64,
-    ingested_memories: &[(MemoryId, i64)],
+    _ingested_memories: &[(MemoryId, i64)],
     supersedes: Option<MemoryId>,
 ) -> Result<MemoryId, Box<dyn std::error::Error>> {
-    let work = crate::storage::work::accept_work(harness.system.storage(), None)?;
-    let result = async {
-        let ns_config = {
-            let storage_r = harness
-                .system
-                .storage()
-                .read()
-                .map_err(|e| format!("storage lock poisoned: {e}"))?;
-            storage_r
-                .get_namespace_by_name("default")?
-                .ok_or("namespace 'default' not found")?
-        };
+    // Store through the public MCP `store_memory` tool, exactly as an agent
+    // does, with the replay clock at the turn's time so memories carry the
+    // conversation's dates. ManualClock is monotonic: an earlier timestamp
+    // keeps the current time.
+    let _ = harness.clock.advance_to(timestamp_ms);
 
-        let tags: Vec<crate::model::Tag> = tag_strings
-            .iter()
-            .map(|t| crate::model::Tag::new(t.clone()))
-            .collect::<Result<_, _>>()?;
-
-        let mut embed_text = match full_text {
-            Some(ft) => format!("{}\n\n{}", summary, ft),
-            None => summary.to_string(),
-        };
-        if !tag_strings.is_empty() {
-            embed_text = format!("{} {}", embed_text, tag_strings.join(" "));
+    let mut tags = Vec::new();
+    let mut topics = Vec::new();
+    let mut emotions = Vec::new();
+    for tag in tag_strings {
+        if tag.starts_with("entity/") {
+            // Carried by `entities` with original casing.
+        } else if let Some(topic) = tag.strip_prefix("topic/") {
+            topics.push(topic.to_string());
+        } else if let Some(emotion) = tag.strip_prefix("emotion/") {
+            emotions.push(emotion.to_string());
+        } else {
+            tags.push(tag.clone());
         }
-        let embedding = harness
-            .system
-            .embedding()
-            .embed(&embed_text)
-            .await
-            .map_err(|e| format!("embedding failed: {e}"))?;
-
-        let memory_id = MemoryId::new();
-
-        let result = crate::derived_completion::DerivedCompletion {
-            storage: harness.system.storage().clone(),
-            cache: harness.system.cache().clone(),
-            graph: harness.system.graph().clone(),
-            vectors: harness.system.vector_index().clone(),
-            fts: harness.system.fts_index().clone(),
-            entities: harness.system.entity_index().clone(),
-        }
-        .insert_reserved_with_work(
-            crate::storage::control::MutationContext::unkeyed(ns_config.id),
-            crate::storage::insertion::InsertMemory {
-                id: Some(memory_id),
-                summary: summary.into(),
-                full_text: full_text.map(str::to_owned),
-                tags,
-                embedding: None,
-                initial_stability: Some(ns_config.initial_stability),
-                created_at: Some(timestamp_ms),
-                parent_id: None,
-                supersedes,
-            },
-            embedding.clone().into(),
-            timestamp_ms,
-            None,
-            Some(&work),
-        )
-        .await?;
-        if result.record.is_none() {
-            return Err(crate::storage::StorageError::CommittedMutation {
-                receipt: Box::new(result.receipt),
-                source: Box::new(crate::storage::StorageError::InvalidMutation(
-                    "committed benchmark insertion lacks its record".into(),
-                )),
-            }
-            .into());
-        }
-
-        let entities = llm_entities.to_vec();
-        if harness.system.config().graph.autolink_enabled {
-            let threshold = harness.system.config().graph.auto_link_threshold as f32;
-            let max_links = harness.system.config().graph.max_auto_links;
-
-            let _ = crate::graph::perform_autolink_with_work(
-                memory_id,
-                ns_config.id,
-                &embedding,
-                tag_strings,
-                threshold,
-                max_links,
-                harness.system.vector_index(),
-                harness.system.graph(),
-                harness.system.storage(),
-                harness.system.cache(),
-                Some(&work),
-            )
-            .await;
-
-            if !entities.is_empty() {
-                let max_entity_links = harness.system.config().graph.max_entity_links;
-                let _ = crate::graph::perform_entity_link_with_work(
-                    memory_id,
-                    ns_config.id,
-                    &entities,
-                    max_entity_links,
-                    harness.system.entity_index(),
-                    harness.system.graph(),
-                    harness.system.storage(),
-                    harness.system.cache(),
-                    Some(&work),
-                )
-                .await;
-            }
-
-            let temporal_window_ms = harness.system.config().graph.temporal_window_ms;
-            let max_temporal_links = harness.system.config().graph.max_temporal_links;
-            let _ = crate::graph::perform_temporal_link_with_work(
-                memory_id,
-                ns_config.id,
-                timestamp_ms,
-                temporal_window_ms,
-                max_temporal_links,
-                ingested_memories,
-                harness.system.graph(),
-                harness.system.storage(),
-                harness.system.cache(),
-                Some(&work),
-            )
-            .await;
-        }
-
-        if !entities.is_empty() {
-            let mut idx = harness.system.entity_index().write().await;
-            idx.add(ns_config.id, memory_id, &entities);
-        }
-
-        harness.system.complete_pending_effects().await?;
-
-        Ok(memory_id)
     }
-    .await;
-    crate::storage::work::finish_work(harness.system.storage(), work);
-    result
+
+    let mut arguments: serde_json::Value = serde_json::json!({
+        "summary": summary,
+        "tags": tags,
+        "entities": llm_entities,
+        "topics": topics,
+        "emotions": emotions,
+        "namespace": "default",
+    });
+    if let Some(text) = full_text {
+        arguments["fullText"] = serde_json::json!(text);
+    }
+    if let Some(id) = supersedes {
+        arguments["supersedes"] = serde_json::json!(id.to_string());
+    }
+
+    let mut result =
+        crate::mcp::tools::dispatch_tool(&harness.bridge, "store_memory", arguments.clone()).await;
+    let mut body = tool_body(&result);
+    // The tool rejects labels outside [A-Za-z0-9/_.:-]. An agent reads that
+    // error and retries with cleaned labels; do the same once.
+    if result.is_error == Some(true) && body.to_string().contains("cannot be represented") {
+        for key in ["entities", "topics", "emotions", "tags"] {
+            let cleaned: Vec<String> = arguments[key]
+                .as_array()
+                .map(|labels| {
+                    labels
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(clean_label)
+                        .filter(|label| !label.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default();
+            arguments[key] = serde_json::json!(cleaned);
+        }
+        result =
+            crate::mcp::tools::dispatch_tool(&harness.bridge, "store_memory", arguments.clone())
+                .await;
+        body = tool_body(&result);
+    }
+    // An invalid `supersedes` target rejects the store; keep the memory and
+    // drop the link, as an agent would.
+    if result.is_error == Some(true)
+        && arguments.get("supersedes").is_some()
+        && body.to_string().contains("supersedes")
+    {
+        if let Some(object) = arguments.as_object_mut() {
+            object.remove("supersedes");
+        }
+        result =
+            crate::mcp::tools::dispatch_tool(&harness.bridge, "store_memory", arguments.clone())
+                .await;
+        body = tool_body(&result);
+    }
+    // A transient, uncommitted STORAGE_UNAVAILABLE is safe to retry, as an
+    // agent would.
+    for attempt in 1..=3u64 {
+        if result.is_error != Some(true)
+            || body.get("error").and_then(|e| e.as_str()) != Some("STORAGE_UNAVAILABLE")
+            || body.get("commitState").and_then(|c| c.as_str()) != Some("notCommitted")
+        {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250 * attempt)).await;
+        result =
+            crate::mcp::tools::dispatch_tool(&harness.bridge, "store_memory", arguments.clone())
+                .await;
+        body = tool_body(&result);
+    }
+    if result.is_error == Some(true) {
+        return Err(format!("store_memory tool failed: {body}").into());
+    }
+    let id = body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("store_memory returned no id: {body}"))?;
+    let id = MemoryId::from_uuid(uuid::Uuid::parse_str(id)?);
+    // Finish derived publication before the next turn, as the old harness did.
+    harness.system.complete_pending_effects().await?;
+    Ok(id)
+}
+
+fn tool_body(result: &crate::mcp::protocol::ToolCallResult) -> serde_json::Value {
+    match &result.structured_content {
+        Some(map) => serde_json::Value::Object(map.clone()),
+        None => result
+            .content
+            .iter()
+            .map(|block| match block {
+                crate::mcp::protocol::ContentBlock::Text { text } => {
+                    serde_json::from_str(text).unwrap_or(serde_json::Value::String(text.clone()))
+                }
+            })
+            .next()
+            .unwrap_or(serde_json::Value::Null),
+    }
+}
+
+/// Spaces become hyphens; characters the tool can't store are dropped.
+fn clean_label(label: &str) -> String {
+    let mapped: String = label
+        .trim()
+        .chars()
+        .map(|c| if c.is_whitespace() { '-' } else { c })
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '.' | ':' | '-'))
+        .collect();
+    mapped.trim_matches('-').to_string()
+}
+
+#[cfg(test)]
+#[test]
+fn clean_label_keeps_only_storable_characters() {
+    assert_eq!(clean_label(" art therapy "), "art-therapy");
+    assert_eq!(clean_label("LGBTQ+ support"), "LGBTQ-support");
+    assert_eq!(clean_label("café"), "caf");
+    assert_eq!(clean_label("  ü "), "");
 }
 
 async fn ingest_conversation(
@@ -1426,19 +1454,8 @@ async fn ingest_conversation(
         };
 
         for mem in &memories {
-            // Preserve the original input field in validation errors. In
-            // particular, an empty entity must not become a valid `entity/`
-            // tag that retained decoding later drops.
-            crate::model::validation::validate_legacy_memory_input(
-                crate::model::validation::MemoryInputRef {
-                    summary: &mem.summary,
-                    full_text: mem.full_text.as_deref(),
-                    tags: &[],
-                    entities: &mem.entities,
-                    topics: &mem.topics,
-                    emotions: &mem.emotions,
-                },
-            )?;
+            // Labels are validated by the store_memory tool itself (see
+            // store_single_memory), as they are for an agent.
             let supersedes_id = mem
                 .supersedes
                 .as_ref()
@@ -1466,7 +1483,15 @@ async fn ingest_conversation(
                 &ingested_memories,
                 supersedes_id,
             )
-            .await?;
+            .await;
+            // A rejected store is skipped, as an agent would move on; count it.
+            let mid = match mid {
+                Ok(mid) => mid,
+                Err(error) => {
+                    eprintln!("  {label}: store rejected: {error}");
+                    continue;
+                }
+            };
             ingested_memories.push((mid, turn.timestamp_ms));
             stored_memories.push((mid.to_string(), mem.summary.clone()));
             total_stored += 1;
@@ -1625,8 +1650,10 @@ pub(super) async fn search_memories(
             require_tags: require_tags.clone(),
             ..PipelineSearchFilter::default()
         };
+        // No access recording: v2 republishes derived indexes on every
+        // access-recording search, which races parallel QA reads.
         let query = SearchQuery {
-            record_access: true,
+            record_access: false,
             query_embedding: None,
             text: Some(bq.query.clone()),
             fts_query: bq.fts_query.clone(),
@@ -1715,7 +1742,7 @@ pub(super) async fn search_memories(
                             ..PipelineSearchFilter::default()
                         };
                         let query = SearchQuery {
-                            record_access: true,
+                            record_access: false,
                             query_embedding: None,
                             text: Some(bq.query.clone()),
                             fts_query: bq.fts_query.clone(),

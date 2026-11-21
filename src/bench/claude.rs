@@ -1443,12 +1443,15 @@ impl LlmClient {
                         max_tokens,
                         temperature: 0.0,
                     };
-                    self.client
+                    let mut req = self
+                        .client
                         .post(&url)
-                        .header("content-type", "application/json")
-                        .json(&body)
-                        .send()
-                        .await
+                        .header("content-type", "application/json");
+                    // Optional bearer key for keyed OpenAI-compatible servers/proxies.
+                    if let Ok(key) = std::env::var("BENCH_LLM_API_KEY") {
+                        req = req.bearer_auth(key);
+                    }
+                    req.json(&body).send().await
                 }
                 BackendKind::GeminiVertex { project_id, region } => {
                     let token = get_gcloud_token()?;
