@@ -220,6 +220,10 @@ pub struct NamespaceStatsResponse {
     /// (`memoryCount` x `embeddingDim` x 4). NOT the size of
     /// `vectors.dat`, which retains freed slots until compaction.
     pub vector_bytes: u64,
+
+    /// The namespace's decay policy, when the server knows its inputs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy: Option<crate::mcp::bridge::NamespacePolicyView>,
 }
 
 /// Memory count breakdown by decay phase.

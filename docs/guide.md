@@ -731,6 +731,9 @@ recalld-cli namespaces stats my-project
 
 # Show stats for all namespaces
 recalld-cli namespaces stats
+
+# Change how fast memories decay in an existing namespace (prints before/after)
+recalld-cli namespaces policy default --decay-rate-multiplier 2 --full-to-summary 0.8
 ```
 
 ### `sweep` -- Trigger a decay sweep
@@ -878,6 +881,11 @@ always says what actually happened to the link.
   still stored.
 - **Counted.** The new memory's `edgeCount` includes the supersedes edge.
   Memories stored before this behaviour existed are not backfilled.
+- **Chains collapse at recall.** If A is superseded by B and B by C, recall
+  returns only the newest version that passes the query's filters: C, or B
+  when C is deleted, a ghost, or filtered out. Older versions stay readable
+  with `get_memory`. Only a stored link counts; supersedes text inside a
+  summary does nothing.
 
 #### Near-duplicate warnings
 
@@ -1046,6 +1054,21 @@ Get statistics for a memory namespace including the live memory count, tombstone
 |---|---|---|---|
 | `namespace` | string | No | Namespace name to get stats for (default: connection namespace, then `"default"`). |
 
+The response also carries `policy`: the namespace's decay settings, the multiplier the sweep uses (`effectiveDecayRateMultiplier`; `decayRateMultiplier` is `null` when inherited), and `daysUntilSummary` / `daysUntilGhost` for a memory that is never recalled.
+
+### `update_namespace_policy`
+
+Change how fast memories decay in an existing namespace, `default` included. Give only the fields to change; the rest keep their current values. See [Changing a namespace's decay](#changing-a-namespaces-decay).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `namespace` | string | No | Namespace to change (default: connection namespace, then `"default"`). |
+| `decayRateMultiplier` | number or null | No | `2` = twice as slow, `0` = no decay; `null` inherits `[decay]`. |
+| `initialStability` | number | No | Starting stability in days for new memories. |
+| `phaseThresholds` | object | No | Any of `fullToSummary`, `summaryToGhost`, `ghostToDelete`. |
+| `permastoreThreshold` | number | No | Stability in days at which a memory becomes permanent. |
+| `desiredRetention`, `defaultDifficulty` | number | No | FSRS scheduling inputs. |
+
 ### `list_memories`
 
 List memories in a namespace with pagination and optional filters. Unlike `recall_memories`, this does not require a search query -- it returns memories sorted by creation date (newest first).
@@ -1064,7 +1087,7 @@ A `limit` above the maximum is rejected, not clamped: silently returning 200 row
 
 ### `list_namespaces`
 
-List every namespace with its ID, embedding dimensions, live memory count, and creation date. Call this first when you do not know which namespaces exist. Counts exclude deleted memories.
+List every namespace with its ID, embedding dimensions, live memory count, creation date and decay `policy` (as in `namespace_stats`). Call this first when you do not know which namespaces exist. Counts exclude deleted memories.
 
 Takes no parameters.
 
@@ -1119,6 +1142,8 @@ Via CLI:
 ```bash
 recalld-cli namespaces create project-work --initial-stability 3.7145
 ```
+
+These decay settings are not fixed at creation. Change them later, `default` included, with `update_namespace_policy` or `recalld-cli namespaces policy`; see [Changing a namespace's decay](#changing-a-namespaces-decay).
 
 ### Per-directory namespace binding
 
@@ -1207,6 +1232,35 @@ sweep_interval_hours = 6.0
 ```
 
 **Phase thresholds and permastore** are set per namespace. The global `[decay.phase_thresholds]` and `permastore_threshold_days` settings are deprecated and have no effect.
+
+### Changing a namespace's decay
+
+Each namespace, `default` included, has its own initial stability, phase thresholds, permastore threshold and optional multiplier, and you can change them at any time. How long a memory keeps its full text follows from those values: with the built-ins, a memory that is never recalled drops to Summary after about 16 days and to Ghost after about 160. `namespace_stats` and `list_namespaces` show each namespace's `policy`, including `daysUntilSummary` and `daysUntilGhost`, so check them before and after a change.
+
+From an AI tool, call `update_namespace_policy` with only the fields to change:
+
+```json
+{
+  "namespace": "default",
+  "decayRateMultiplier": 2,
+  "phaseThresholds": { "fullToSummary": 0.8 }
+}
+```
+
+From the shell, `recalld-cli namespaces policy` does the same and prints the policy before and after:
+
+```bash
+# Memories in project-work last twice as long
+recalld-cli namespaces policy project-work --decay-rate-multiplier 2
+
+# Keep full text longer in default, and summaries a little less long
+recalld-cli namespaces policy default --full-to-summary 0.6 --summary-to-ghost 0.25
+
+# Drop the namespace's own multiplier and follow [decay] again
+recalld-cli namespaces policy project-work --inherit-decay-rate
+```
+
+The other flags are `--initial-stability DAYS`, `--ghost-to-delete R` and `--permastore-days DAYS`. A change applies to every memory in the namespace from the next sweep, recall or reinforcement; `initialStability` affects memories stored afterwards. The thresholds must stay in order (`0 < ghostToDelete < summaryToGhost < fullToSummary < 1`), and an invalid change is rejected without writing anything. Returning a namespace to the inherited multiplier records the current `[decay]` value for it straight away, so it keeps working without any further step.
 
 ### Manual sweep
 

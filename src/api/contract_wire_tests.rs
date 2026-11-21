@@ -66,6 +66,11 @@ async fn contract_http_rejects_before_parsing_provider_and_all_mutations() {
             ),
             ("POST", "/decay/sweep"),
         ] {
+            // #237: contract 2 is published for policy replacement only;
+            // `native_policy_wire_gate_opens_for_v2_only` covers that pair.
+            if selector == ["2"] && path == "/namespaces/1/policy" {
+                continue;
+            }
             // Intentionally malformed JSON: selector must win before extraction.
             let (status, value) = response(router.clone(), method, path, &selector, "{").await;
             assert_eq!(status, 400, "{selector:?} {path}: {value}");
@@ -81,7 +86,7 @@ async fn contract_http_rejects_before_parsing_provider_and_all_mutations() {
 }
 
 #[tokio::test]
-async fn native_policy_wire_public_gate_remains_closed_for_v1_and_v2() {
+async fn native_policy_wire_gate_opens_for_v2_only() {
     let f = Fixture::new();
     let provider = Arc::new(CountingProvider::default());
     let router = crate::api::router(
@@ -89,7 +94,8 @@ async fn native_policy_wire_public_gate_remains_closed_for_v1_and_v2() {
         &crate::api::ApiConfig::default(),
     );
     let before = files(f.path());
-    for selectors in [vec![], vec!["1"], vec!["2"]] {
+    // Contract 1 (explicit or omitted) still cannot replace a policy.
+    for selectors in [vec![], vec!["1"]] {
         let (status, value) = response(
             router.clone(),
             "PUT",
@@ -101,8 +107,43 @@ async fn native_policy_wire_public_gate_remains_closed_for_v1_and_v2() {
         assert_eq!(status, 400);
         assert_eq!(value["field"], "contractVersion");
     }
+    // #237: contract 2 reaches the policy handler (this legacy fixture has no
+    // native catalog, so it answers with a contract-2 envelope, not a gate error).
+    let body = json!({"policy":{
+        "initialStability":1.0,"defaultDifficulty":5,"permastoreThreshold":100,"desiredRetention":0.9,
+        "phaseThresholds":{"fullToSummary":0.8,"summaryToGhost":0.3,"ghostToDelete":0.1},
+        "decayRateMultiplier":null
+    }});
+    let (status, value) = response(
+        router.clone(),
+        "PUT",
+        "/namespaces/1/policy",
+        &["2"],
+        &body.to_string(),
+    )
+    .await;
+    assert_ne!(value["field"], "contractVersion", "{status} {value}");
+    assert_eq!(value["contractVersion"], 2, "{value}");
+    assert_eq!(value["status"], "error", "{value}");
+    use crate::api::middleware::is_policy_replacement;
+    use axum::http::Method;
+    assert!(is_policy_replacement(
+        &Method::PUT,
+        "/namespaces/default/policy"
+    ));
+    for (method, path) in [
+        (Method::POST, "/namespaces/1/policy"),
+        (Method::PUT, "/namespaces//policy"),
+        (Method::PUT, "/namespaces/1/2/policy"),
+        (Method::PUT, "/namespaces/1/policy/x"),
+        (Method::PUT, "/memories/1/policy"),
+    ] {
+        assert!(!is_policy_replacement(&method, path), "{method} {path}");
+    }
     assert_eq!(files(f.path()), before);
     assert_eq!(provider.0.load(Ordering::SeqCst), 0);
+    // MCP keeps refusing contract 2 for every tool, this one included; its
+    // published form is the contract-1 partial change.
     let bridge = StubBridge::default().into_bridge();
     let result = crate::mcp::tools::dispatch_tool(
         &bridge,
@@ -112,9 +153,9 @@ async fn native_policy_wire_public_gate_remains_closed_for_v1_and_v2() {
     .await;
     assert_eq!(result.is_error, Some(true));
     assert!(
-        !crate::mcp::tools::tool_definitions()
-            .iter()
-            .any(|t| t.name == "update_namespace_policy")
+        serde_json::to_string(&result)
+            .unwrap()
+            .contains("contractVersion 2 is not supported")
     );
 }
 

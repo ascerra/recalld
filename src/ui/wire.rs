@@ -514,6 +514,8 @@ pub(crate) fn declarations() -> String {
         crate::mcp::bridge::SubsystemHealth,
         crate::mcp::bridge::NamespaceInfo,
         crate::mcp::bridge::NamespaceStats,
+        crate::mcp::bridge::NamespacePolicyView,
+        crate::model::namespace::PhaseThresholds,
         crate::mcp::bridge::PhaseCounts,
         crate::api::models::HealthReport,
         crate::api::models::HealthOverview,

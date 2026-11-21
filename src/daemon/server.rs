@@ -1001,6 +1001,21 @@ async fn dispatch_bounded(
             serde_json::to_value(result).map_err(|e| BridgeError::Internal(e.to_string()))
         }
 
+        "update_namespace_policy" => {
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Params {
+                namespace: String,
+                patch: serde_json::Map<String, serde_json::Value>,
+            }
+            let p: Params = serde_json::from_value(params)
+                .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;
+            let (status, envelope) = namespaces
+                .update_namespace_policy(&p.namespace, p.patch)
+                .await?;
+            Ok(serde_json::json!({"status": status, "envelope": envelope}))
+        }
+
         "namespace_stats" => {
             let p: NamespaceStatsParams = serde_json::from_value(params)
                 .map_err(|e| BridgeError::InvalidInput(e.to_string()))?;

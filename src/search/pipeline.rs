@@ -472,11 +472,12 @@ pub trait GraphReader: Send + Sync {
         Vec::new()
     }
 
-    /// If this memory has been superseded, return the ID of the memory
-    /// that replaces it. Follows the chain to the latest version.
-    fn superseded_by(&self, id: &MemoryId) -> Option<MemoryId> {
+    /// If this memory has been superseded, return every memory that
+    /// replaces it, oldest first, ending at the latest version. Empty when
+    /// the memory is current.
+    fn superseded_by(&self, id: &MemoryId) -> Vec<MemoryId> {
         let _ = id;
-        None
+        Vec::new()
     }
 }
 
@@ -1667,16 +1668,15 @@ impl QueryEngine {
     ) -> Result<()> {
         use std::collections::{HashMap, HashSet};
 
-        // -- Plan: which candidates are superseded, and by what. Nothing is
-        // removed here; that decision waits until the replacement is known
-        // to be usable.
-        let planned: Vec<(usize, MemoryId)> = candidates
+        // -- Plan: which candidates are superseded, and by which chain of
+        // newer versions. Nothing is removed here; that decision waits until
+        // a replacement is known to be usable.
+        let planned: Vec<(usize, Vec<MemoryId>)> = candidates
             .iter()
             .enumerate()
             .filter_map(|(idx, candidate)| {
-                self.graph
-                    .superseded_by(&candidate.record.id)
-                    .map(|replacement_id| (idx, replacement_id))
+                let chain = self.graph.superseded_by(&candidate.record.id);
+                (!chain.is_empty()).then_some((idx, chain))
             })
             .collect();
 
@@ -1684,11 +1684,58 @@ impl QueryEngine {
             return Ok(());
         }
 
-        // Several superseded candidates can share one replacement; it
-        // inherits the best of their scores so it ranks at least as high as
-        // the memory it stands in for.
+        let candidate_indices: HashMap<MemoryId, usize> = candidates
+            .iter()
+            .enumerate()
+            .map(|(idx, c)| (c.record.id, idx))
+            .collect();
+        // Revalidate every chain member, present or not, against canonical
+        // metadata: any of them may end up standing in for the old memory.
+        let mut to_load: Vec<MemoryId> = planned
+            .iter()
+            .flat_map(|(_, chain)| chain.iter().copied())
+            .collect();
+        to_load.sort();
+        to_load.dedup();
+
+        // -- Validate: load each chain member, then subject it to the
+        // query's filters before letting it displace anything.
+        let records = match self.strength_records(&to_load, context).await {
+            Ok(records) => records,
+            Err(e) => {
+                if context.is_some_and(StrengthContext::explicit) {
+                    return Err(e);
+                }
+                // Without the replacements there is nothing to put in
+                // the originals' place, so the originals stay.
+                warn!(
+                    error = %e,
+                    count = to_load.len(),
+                    "failed to load supersedes replacements; keeping the superseded memories in the results"
+                );
+                return Ok(());
+            }
+        };
+        let mut eligible: HashMap<MemoryId, CachedRecord> = records
+            .into_iter()
+            .filter(|record| Self::passes_hard_filters(record, query, namespace_id))
+            .map(|record| (record.id, record))
+            .collect();
+
+        // Each superseded candidate resolves to the newest chain member that
+        // may be returned, so a deleted, ghosted or filtered-out newest
+        // version falls back to the one before it instead of letting the
+        // whole chain through. Several superseded candidates can share one
+        // replacement; it inherits the best of their scores so it ranks at
+        // least as high as the memory it stands in for.
+        let mut resolved: HashSet<usize> = HashSet::new();
         let mut inherited_scores: HashMap<MemoryId, f32> = HashMap::new();
-        for (idx, replacement_id) in &planned {
+        for (idx, chain) in &planned {
+            let Some(replacement_id) = chain.iter().rev().find(|id| eligible.contains_key(id))
+            else {
+                continue;
+            };
+            resolved.insert(*idx);
             let score = candidates[*idx].composite_score;
             inherited_scores
                 .entry(*replacement_id)
@@ -1696,78 +1743,43 @@ impl QueryEngine {
                 .or_insert(score);
         }
 
-        let candidate_indices: HashMap<MemoryId, usize> = candidates
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| (c.record.id, idx))
-            .collect();
-        let mut eligible = HashSet::new();
-        // Revalidate existing and injected replacements against canonical metadata.
-        let to_load: Vec<MemoryId> = inherited_scores.keys().copied().collect();
-
-        // -- Validate: build each replacement, then subject it to the
-        // query's filters before letting it displace anything.
-        let mut injected: Vec<Candidate> = Vec::with_capacity(to_load.len());
-        if !to_load.is_empty() {
-            let records = match self.strength_records(&to_load, context).await {
-                Ok(records) => records,
-                Err(e) => {
-                    if context.is_some_and(StrengthContext::explicit) {
-                        return Err(e);
-                    }
-                    // Without the replacements there is nothing to put in
-                    // the originals' place, so the originals stay.
-                    warn!(
-                        error = %e,
-                        count = to_load.len(),
-                        "failed to load supersedes replacements; keeping the superseded memories in the results"
-                    );
-                    return Ok(());
-                }
+        let mut injected: Vec<Candidate> = Vec::with_capacity(inherited_scores.len());
+        for (replacement_id, inherited_score) in &inherited_scores {
+            let record = eligible
+                .remove(replacement_id)
+                .expect("chosen from eligible");
+            if let Some(&idx) = candidate_indices.get(replacement_id) {
+                let replacement = &mut candidates[idx];
+                replacement.record = record;
+                replacement.composite_score = replacement.composite_score.max(*inherited_score);
+                continue;
+            }
+            let effective_r = Self::compute_effective_r(&record);
+            let entity_score = if query_entities.is_empty() {
+                0.0
+            } else {
+                crate::model::entity_overlap(query_entities, &record.entities)
             };
 
-            for record in records {
-                if !Self::passes_hard_filters(&record, query, namespace_id) {
-                    continue;
-                }
-                let inherited_score = inherited_scores.get(&record.id).copied().unwrap_or(0.0);
-                eligible.insert(record.id);
-                if let Some(&idx) = candidate_indices.get(&record.id) {
-                    let replacement = &mut candidates[idx];
-                    replacement.record = record;
-                    replacement.composite_score = replacement.composite_score.max(inherited_score);
-                    continue;
-                }
-                let effective_r = Self::compute_effective_r(&record);
-                let entity_score = if query_entities.is_empty() {
-                    0.0
-                } else {
-                    crate::model::entity_overlap(query_entities, &record.entities)
-                };
-
-                let mut replacement = Candidate::new(record);
-                replacement.effective_r = effective_r;
-                replacement.entity_score = entity_score;
-                // No own retrieval evidence: inherit the already-boosted score once.
-                replacement.composite_score = inherited_score;
-                injected.push(replacement);
-            }
+            let mut replacement = Candidate::new(record);
+            replacement.effective_r = effective_r;
+            replacement.entity_score = entity_score;
+            // No own retrieval evidence: inherit the already-boosted score once.
+            replacement.composite_score = *inherited_score;
+            injected.push(replacement);
         }
 
-        // -- Commit: drop only the candidates whose replacement made it.
-        let to_remove: HashSet<usize> = planned
-            .iter()
-            .filter(|(_, replacement_id)| eligible.contains(replacement_id))
-            .map(|(idx, _)| *idx)
-            .collect();
-
+        // -- Commit: drop the candidates whose replacement made it, and any
+        // present chain member that canonical metadata no longer allows.
+        let loaded: HashSet<MemoryId> = to_load.into_iter().collect();
         *candidates = std::mem::take(candidates)
             .into_iter()
             .enumerate()
             .filter(|(idx, candidate)| {
-                !to_remove.contains(idx)
-                    && (!inherited_scores.contains_key(&candidate.record.id)
-                        || eligible.contains(&candidate.record.id))
+                !resolved.contains(idx)
+                    && (!loaded.contains(&candidate.record.id)
+                        || eligible.contains_key(&candidate.record.id)
+                        || inherited_scores.contains_key(&candidate.record.id))
             })
             .map(|(_, candidate)| candidate)
             .collect();
@@ -2718,10 +2730,12 @@ mod tests {
     // are wired to panic: if one ever starts being called, the test should
     // say so rather than quietly return an empty answer.
 
-    /// Supersedes chains, pre-resolved to their terminal memory.
+    /// Supersedes chains, pre-resolved to their terminal memory, or given
+    /// in full (oldest replacement first) in `chains`.
     #[derive(Default)]
     pub(super) struct StubGraph {
         terminal: HashMap<MemoryId, MemoryId>,
+        chains: HashMap<MemoryId, Vec<MemoryId>>,
     }
 
     impl GraphReader for StubGraph {
@@ -2729,8 +2743,11 @@ mod tests {
             Vec::new()
         }
 
-        fn superseded_by(&self, id: &MemoryId) -> Option<MemoryId> {
-            self.terminal.get(id).copied()
+        fn superseded_by(&self, id: &MemoryId) -> Vec<MemoryId> {
+            match self.chains.get(id) {
+                Some(chain) => chain.clone(),
+                None => self.terminal.get(id).map(|t| vec![*t]).unwrap_or_default(),
+            }
         }
     }
 
@@ -3561,6 +3578,85 @@ mod tests {
 
         assert_eq!(ids(&candidates), vec![new]);
         assert!(candidates[0].composite_score >= 0.85);
+    }
+
+    /// A <- B <- C with every version matching the query: only C comes
+    /// back, ranked at least as high as the best version it replaces.
+    #[tokio::test]
+    async fn whole_chain_collapses_to_its_newest_version() {
+        let (a, b, c) = (MemoryId::new(), MemoryId::new(), MemoryId::new());
+        let mut graph = StubGraph::default();
+        graph.chains.insert(a, vec![b, c]);
+        graph.chains.insert(b, vec![c]);
+        let mut meta = StubMetaStore::default();
+        meta.records.insert(b, rec(b));
+        meta.records.insert(c, rec(c));
+        let engine = engine(graph, meta);
+
+        let mut candidates = vec![
+            candidate(rec(a), 0.9),
+            candidate(rec(b), 0.7),
+            candidate(rec(c), 0.4),
+        ];
+        engine
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(ids(&candidates), vec![c]);
+        assert!(candidates[0].composite_score >= 0.9);
+    }
+
+    /// When the newest version cannot be returned, the chain collapses to
+    /// the newest one that can instead of letting every older version in.
+    #[tokio::test]
+    async fn chain_with_unreturnable_newest_falls_back_to_the_version_before_it() {
+        let (a, b, c) = (MemoryId::new(), MemoryId::new(), MemoryId::new());
+        let mut graph = StubGraph::default();
+        graph.chains.insert(a, vec![b, c]);
+        graph.chains.insert(b, vec![c]);
+        let mut meta = StubMetaStore::default();
+        let mut deleted = rec(c);
+        deleted.phase = DecayPhase::Tombstone;
+        meta.records.insert(b, rec(b));
+        meta.records.insert(c, deleted);
+        let engine = engine(graph, meta);
+
+        // Only the oldest version matched: B is injected in its place.
+        let mut candidates = vec![candidate(rec(a), 0.9)];
+        engine
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids(&candidates), vec![b]);
+        assert_eq!(candidates[0].composite_score, 0.9);
+
+        // Both older versions matched: they collapse into B.
+        let mut candidates = vec![candidate(rec(a), 0.9), candidate(rec(b), 0.6)];
+        engine
+            .resolve_supersedes(
+                &mut candidates,
+                &query(json!({"text": "q"})),
+                &[],
+                ns(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(ids(&candidates), vec![b]);
+        assert_eq!(candidates[0].composite_score, 0.9);
     }
     pub(super) fn mid(n: u128) -> MemoryId {
         MemoryId::from_bytes(n.to_be_bytes())

@@ -537,23 +537,32 @@ impl RelationshipGraph {
 
     /// Follow incoming `Supersedes` edges to the newest version of `id`.
     ///
+    /// The last element of [`Self::supersedes_chain`]; see there for the
+    /// edge direction and cycle handling.
+    pub fn supersedes_terminal(&self, id: &MemoryId) -> Option<MemoryId> {
+        self.supersedes_chain(id).last().copied()
+    }
+
+    /// Every version that replaces `id`, oldest first, ending at the newest.
+    ///
     /// A `Supersedes` edge runs source (new) -> target (old), so the memory
     /// that replaces `id` is the *source* of an incoming edge. The walk
-    /// repeats until it reaches a memory nothing supersedes.
+    /// repeats until it reaches a memory nothing supersedes. Recall needs
+    /// the whole path, not just its end, so that a chain whose newest member
+    /// cannot be returned (deleted, ghosted, filtered out) still collapses to
+    /// the newest member that can.
     ///
-    /// Returns `None` when `id` is already current, and also when the chain
-    /// contains a cycle. A cycle has no newest version, so substituting an
-    /// arbitrary node from inside it would make recall return a different
-    /// memory depending on hash iteration order; returning the original
-    /// memory unchanged is the only stable answer.
-    pub fn supersedes_terminal(&self, id: &MemoryId) -> Option<MemoryId> {
+    /// Empty when `id` is already current, and also when the chain contains
+    /// a cycle. A cycle has no newest version, so substituting an arbitrary
+    /// node from inside it would make recall return a different memory
+    /// depending on hash iteration order; returning the original memory
+    /// unchanged is the only stable answer.
+    pub fn supersedes_chain(&self, id: &MemoryId) -> Vec<MemoryId> {
         /// Hop ceiling, a second guard behind the cycle check. Real
         /// correction chains are a handful of links at most.
         const MAX_HOPS: usize = 10;
 
-        let mut visited: std::collections::HashSet<MemoryId> = std::collections::HashSet::new();
-        visited.insert(*id);
-
+        let mut chain = Vec::new();
         let mut current = *id;
         for _ in 0..MAX_HOPS {
             let replacement = self.incoming_edges(&current).into_iter().find_map(|edge| {
@@ -566,13 +575,15 @@ impl RelationshipGraph {
 
             match replacement {
                 // Revisiting a node means the chain loops.
-                Some(next) if !visited.insert(next) => return None,
-                Some(next) => current = next,
+                Some(next) if next == *id || chain.contains(&next) => return Vec::new(),
+                Some(next) => {
+                    chain.push(next);
+                    current = next;
+                }
                 None => break,
             }
         }
-
-        if current == *id { None } else { Some(current) }
+        chain
     }
 
     /// Read-only access to an edge by key.
@@ -994,6 +1005,8 @@ mod tests {
 
         assert_eq!(graph.supersedes_terminal(&b), Some(c));
         assert_eq!(graph.supersedes_terminal(&a), Some(c));
+        assert_eq!(graph.supersedes_chain(&b), vec![a, c]);
+        assert!(graph.supersedes_chain(&c).is_empty());
     }
 
     /// A memory nothing has replaced resolves to nothing, so recall leaves

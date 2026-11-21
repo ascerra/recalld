@@ -58,6 +58,18 @@ fn search_hit() -> Value {
     )
 }
 
+/// `NamespacePolicyView`: the stored policy plus the derived effective terms.
+fn policy() -> Value {
+    let number = json!({"type":"number"});
+    let days = json!({"type":["number","null"]});
+    object(json!({
+        "initialStability":number,"defaultDifficulty":number,"desiredRetention":number,
+        "phaseThresholds":object(json!({"fullToSummary":number,"summaryToGhost":number,"ghostToDelete":number})),
+        "permastoreThreshold":number,"decayRateMultiplier":days,
+        "effectiveDecayRateMultiplier":number,"daysUntilSummary":days,"daysUntilGhost":days
+    }))
+}
+
 pub(super) fn output(tool: &str) -> Option<Value> {
     let count = json!({"type":"integer","minimum":0,"maximum":u64::MAX});
     let name = json!({"type":"string"});
@@ -151,12 +163,15 @@ pub(super) fn output(tool: &str) -> Option<Value> {
             }));
             json!({"type":"object","anyOf":[single,scan]})
         }
-        "namespace_stats" => object(json!({
-            "name":name,"memoryCount":count,"tombstoneCount":count,
-            "phaseCounts":object(json!({"full":count,"summary":count,"ghost":count})),
-            "permastoreCount":count,"avgStrength":{"type":"number"},
-            "edgeCount":count,"vectorBytes":count
-        })),
+        "namespace_stats" => object_optional(
+            json!({
+                "name":name,"memoryCount":count,"tombstoneCount":count,
+                "phaseCounts":object(json!({"full":count,"summary":count,"ghost":count})),
+                "permastoreCount":count,"avgStrength":{"type":"number"},
+                "edgeCount":count,"vectorBytes":count,"policy":policy()
+            }),
+            &["policy"],
+        ),
         "list_tags" => {
             let bucket = object(json!({
                 "total":count,"truncated":{"type":"boolean"},

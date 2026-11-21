@@ -1624,6 +1624,7 @@ mod tests {
             "create_namespace",
             "move_memories_v1",
             "create_namespace_bounded_v1",
+            "update_namespace_policy",
             "reinforce_memory",
             "delete_memory",
             "delete_memories",
