@@ -1448,12 +1448,10 @@ mod tests {
         assert_eq!(marker.http_status, 200);
         assert!(marker.observation_receipts.is_empty() && marker.envelope.readiness.is_none());
         assert_erased_marker(&marker.envelope.data.unwrap().memory, dead);
-        // A live memory's strength is computed with the graph (#239), which
-        // waits for the pending effect: unavailable, not stale.
         let present = native_point(&system, live).await;
-        assert_eq!(present.http_status, 503, "{present:?}");
-        assert!(present.envelope.data.is_none());
-        assert!(present.observation_receipts.is_empty());
+        assert_eq!(present.http_status, 200);
+        assert_eq!(present.envelope.data.unwrap().memory.id, live);
+        assert!(present.observation_receipts.is_empty() && present.envelope.readiness.is_none());
         {
             let engine = system.storage.read().unwrap();
             let metadata = engine.meta_store();
