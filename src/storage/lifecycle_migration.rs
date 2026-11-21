@@ -465,13 +465,20 @@ pub(crate) fn validate_policy_history(
             before_purge(receipt, t.namespace_id)?;
         }
     }
+    // Revision zero is the creation lifecycle: legacy for migrated namespaces
+    // and older creation receipts, as recorded for newer native creations.
+    let initial_lifecycle = |namespace_id: u32| {
+        namespace_creations
+            .get(&namespace_id)
+            .map_or(LifecycleVersion::LegacyAccessV1, |c| c.initial_lifecycle())
+    };
     let check_record_policy = |receipt: &WriteReceipt,
                                namespace_id: NamespaceId,
                                lifecycle_version: LifecycleVersion,
                                policy_revision: Generation|
      -> Result<(), StorageError> {
         let version = if policy_revision == Generation::default() {
-            LifecycleVersion::LegacyAccessV1
+            initial_lifecycle(namespace_id.get())
         } else {
             policies
                 .get(&namespace_id.get())
@@ -843,7 +850,7 @@ pub(crate) fn validate_policy_history(
             .schema
             .as_ref()
             .ok_or_else(|| invalid("namespace lacks lifecycle schema"))?;
-        let mut version = LifecycleVersion::LegacyAccessV1;
+        let mut version = initial_lifecycle(ns.id.get());
         let mut revision = Generation::default();
         let mut last_in_origin = HashMap::new();
         if let Some(history) = policies.get(&ns.id.get()) {
@@ -1046,7 +1053,7 @@ pub(crate) fn validate_policy_history(
             },
             MutationOutcome::NativeNamespaceCreated { transition: t } => {
                 if current_policy.remove(&t.namespace_id.get())
-                    != Some((LifecycleVersion::LegacyAccessV1, Generation::default()))
+                    != Some((t.initial_lifecycle(), Generation::default()))
                     || records
                         .get(&t.namespace_id.get())
                         .is_some_and(|rows| !rows.is_empty())

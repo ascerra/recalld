@@ -936,10 +936,14 @@ fn reinforce_memory_def() -> ToolInfo {
         meta: None,
         name: "reinforce_memory".to_string(),
         title: Some("Reinforce Memory".to_string()),
-        description: "Strengthen a memory that proved useful. Increases its \
-            stability so it decays more slowly. Use after retrieving and \
-            benefiting from a memory. Quality ratings: 1=forgot (weakens), \
-            2=hard, 3=good (default), 4=easy (strongest reinforcement)."
+        description: "Report that a memory you used helped. This is what \
+            strengthens a memory: recall alone does not. Its stability grows \
+            by how long it went unused, so it decays more slowly. Quality \
+            ratings: 1=forgot (weakens), 2=hard, 3=good (default), 4=easy \
+            (strongest reinforcement). On a namespace still on the legacy \
+            lifecycle, a recall that records access restarts the decay clock, \
+            so reinforcing right after it adds nothing; recall with \
+            recordAccess:false there, or migrate it (recalld lifecycle)."
             .to_string(),
         input_schema: json!({
             "type": "object",

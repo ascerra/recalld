@@ -3,11 +3,11 @@
 
 ## 1. Overview
 
-recalld is an AI memory system written in Rust. It stores observations, facts, and context as "memories" that decay over time following the FSRS v4.5 spaced repetition model, unless reinforced by retrieval.
+recalld is an AI memory system written in Rust. It stores observations, facts, and context as "memories" that decay over time following the FSRS v4.5 spaced repetition model, unless an agent reinforces them (`reinforce_memory`) after they helped.
 
 ### Design goals
 
-- **Spaced-repetition decay**: memories weaken over time and are strengthened by retrieval, following the spacing effect and forgetting curve.
+- **Spaced-repetition decay**: memories weaken over time and are strengthened by explicit feedback (`reinforce_memory`), following the spacing effect and forgetting curve. Being returned by a recall does not strengthen a memory (see [Lifecycles](#lifecycles)).
 - **Phase transitions**: memories transition through phases (Full -> Summary -> Ghost -> Removed), dropping data at each step. Explicit deletion produces a Tombstone (content stripped, but graph node and edges preserved for spreading activation relay).
 - **Associative recall**: a graph of typed relationships enables spreading activation, so retrieving one memory can surface related ones.
 - **Retrieval-induced forgetting (RIF)**: retrieving a memory suppresses competing neighbors, matching the empirical RIF effect from human cognition.
@@ -187,7 +187,7 @@ Both directions are stored for O(1) neighbor lookups in either direction. Orphan
 
 ### Phase transitions
 
-Memories degrade through four phases as retrievability decays. Each phase sheds data to free storage while preserving what's most useful for recall. Reinforcement (retrieval or explicit `reinforce_memory`) resets strength and can prevent transitions. User deletion via `forget_memory` jumps directly to Tombstone from any phase.
+Memories degrade through four phases as retrievability decays. Each phase sheds data to free storage while preserving what's most useful for recall. Reinforcement (`reinforce_memory`) resets strength and can prevent transitions; on a namespace still on the legacy lifecycle, a retrieval that records access resets it too (see [Lifecycles](#lifecycles)). User deletion via `forget_memory` jumps directly to Tombstone from any phase.
 
 ```mermaid
 graph LR
@@ -260,7 +260,7 @@ R = (1 + FACTOR * effective_t / S) ^ DECAY
 
 ### Stability growth (SInc)
 
-When a memory is accessed, its stability increases:
+When `reinforce_memory` is called with quality 2-4, the memory's stability increases. R is its retrievability at that moment, measured from its decay clock: the last reinforcement, or when it was stored (for a memory migrated from the legacy lifecycle, its last recorded access before the migration):
 
 ```
 SInc = e^W8 * (11 - D) * S^(-W9) * (e^(W10 * (1 - R)) - 1) + 1
@@ -273,25 +273,28 @@ FSRS v4.5 trained parameters:
 - `W10 = 1.0461` (spacing effect strength)
 - `D = 5.0` (fixed difficulty, midpoint of 1-10 scale)
 
-The spacing effect is the key insight: accessing a nearly-forgotten memory (R=0.30) strengthens it ~10x more than accessing a fresh one (R=0.90).
-
-#### Access types and partial weight
-
-| Access kind | SInc applied | Context |
-|------------|-------------|---------|
-| `DirectRetrieval` | Full SInc | Memory was a direct search result |
-| `ManualReinforcement` | Full SInc | User called `reinforce_memory` |
-| `AssociativeRetrieval` | `1 + (SInc - 1) * 0.5` | Memory was a graph neighbor of a result |
-| `DecaySweep` | No update | Sweeps are not accesses |
+The spacing effect is the key insight: reinforcing a nearly-forgotten memory (R=0.30) strengthens it ~10x more than reinforcing a fresh one (R=0.90). A memory reinforced again straight away has R=1 and does not grow. Reinforcement then restarts the decay clock and sets strength to 1.0.
 
 #### Quality ratings (reinforce_memory)
 
-| Rating | Multiplier on (SInc - 1) | Meaning |
-|--------|-------------------------|---------|
-| 1 (forgot) | 0.2 | Substantially reduced stability growth |
-| 2 (hard) | 0.7 | Reduced growth |
-| 3 (good) | 1.0 | Standard FSRS |
-| 4 (easy) | 1.3 | Boosted growth |
+| Rating | Effect | Meaning |
+|--------|--------|---------|
+| 1 (forgot) | FSRS post-lapse stability, usually lower than before | The memory was wrong or unhelpful |
+| 2 (hard) | `1 + (SInc - 1) * 0.7` | Reduced growth |
+| 3 (good) | `SInc` | Standard FSRS |
+| 4 (easy) | `1 + (SInc - 1) * 1.3` | Boosted growth |
+
+#### Lifecycles
+
+Each namespace records which lifecycle it follows. The difference is what a recall, `get_memory` or `find_similar_memories` that records access (`recordAccess: true`, the default) does to the memories it returns. Neither lifecycle grows stability on retrieval; sweeps are never accesses.
+
+| | `explicit_feedback_v2` | `legacy_access_v1` |
+|---|---|---|
+| Retrieval that records access | Records the retrieval time. The decay clock, strength and stability are unchanged. | Restarts the decay clock, so strength goes back to 1.0. Stability is unchanged. |
+| `reinforce_memory` | Grows stability from the time on the decay clock. | The same, but a retrieval just before it has restarted the clock, so R=1 and stability does not grow ([#250](https://github.com/calebevans/recalld/issues/250)). |
+| A memory recalled often but never reinforced | Keeps decaying, so stale facts fade. | Stays near strength 1.0 at its initial stability. |
+
+New namespaces use `explicit_feedback_v2`, including `default` on a new store. Namespaces created by earlier releases keep `legacy_access_v1` until an operator migrates them offline with `recalld lifecycle migrate` (see "Moving to explicit feedback" in [guide.md](guide.md)). Migration changes no stability, strength or decay clock; it changes what later retrievals do.
 
 ### Phase thresholds
 

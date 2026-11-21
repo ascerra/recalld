@@ -105,6 +105,12 @@ impl MetadataStore {
                 sha256: digest.finalize().into(),
             });
             schema.lifecycle.record_generation = schema.lifecycle.record_generation.next()?;
+            crate::storage::native_move::follow_destination_policy(
+                &mut schema.lifecycle,
+                &mut after.last_accessed_at,
+                destination_proof.schema.lifecycle_version,
+                destination_proof.schema.policy_revision,
+            );
             let text_hash = match document.evidence.full_text {
                 crate::storage::vector_certification::RetainedTextInput::Absent => None,
                 crate::storage::vector_certification::RetainedTextInput::Present { sha256 } => {
@@ -276,14 +282,14 @@ impl MetadataStore {
         let from = NativeNamespaceProof::capture(&source)?;
         let to = NativeNamespaceProof::capture(&destination)?;
         if source.id == destination.id
-            || from.schema.lifecycle_version != to.schema.lifecycle_version
-            || from.schema.policy_revision != to.schema.policy_revision
             || !matches!(
                 to.schema.embedding_binding,
                 crate::model::schema::EmbeddingBinding::Bound { .. }
             )
         {
-            return Err(StorageError::InvalidMutation("move requires distinct namespaces with compatible lifecycle revisions and a bound destination".into()));
+            return Err(StorageError::InvalidMutation(
+                "move requires distinct namespaces and a bound destination".into(),
+            ));
         }
         self.require_certified_namespace(state.generation_ref(), &destination)?;
         let table = read.open_table(META_TABLE)?;

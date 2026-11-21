@@ -672,7 +672,9 @@ Response:
 
 ### reinforce_memory
 
-Strengthen a memory. Increases its stability so it decays more slowly.
+Tell recalld a memory helped. This is what makes a memory last: its stability grows by how long it went without reinforcement, so it decays more slowly afterwards, and its decay clock restarts. Being returned by `recall_memories` does not strengthen a memory.
+
+Each namespace follows one of two lifecycles. New namespaces, including `default` on a new store, use explicit feedback: a recall that records access notes when it returned the memory and leaves its decay clock alone, so a `reinforce_memory` after it grows stability from the real idle time. Namespaces created by earlier releases stay on the legacy lifecycle until migrated: there, a recall that records access restarts the decay clock, so a `reinforce_memory` straight after it adds nothing ([#250](https://github.com/calebevans/recalld/issues/250)), and a memory that keeps being recalled stays at full strength however stale it is. Migrate those namespaces with `recalld lifecycle migrate` (see "Moving to explicit feedback" in [guide.md](guide.md)), or recall with `recordAccess: false` before reinforcing until then.
 
 #### Parameters
 
@@ -1351,7 +1353,7 @@ Reinforce memories when they prove useful:
 {"id": "<uuid>", "quality": 4}
 ```
 
-- **Deliberate feedback:** Reinforce with quality 3 or 4 after judging a memory useful, not automatically after every retrieval.
+- **Deliberate feedback:** Reinforce with quality 3 or 4 after judging a memory useful, not automatically after every retrieval. Recall alone does not keep a memory alive, so a memory that helps but is never reinforced still fades.
 - **After applying context:** If a recalled memory helped you give better advice, reinforce it.
 - **Correct wrong memories:** Verify the correction and use same-namespace `supersedes`. A low quality rating is feedback, not a guaranteed deletion or weakening operation; forget only when deletion is intended.
 - **Use `supersedes`:** When storing a correction, pass the old memory's ID as `supersedes` so recall returns the correction instead of the stale memory. The old memory is kept on disk, not deleted.

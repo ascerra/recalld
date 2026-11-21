@@ -187,6 +187,11 @@ fn assert_preserved(before: &crate::model::DiskRecord, after: &crate::model::Dis
     schema.vector = after.schema.as_ref().unwrap().vector.clone();
     schema.embedding_origin = None;
     schema.lifecycle.record_generation = schema.lifecycle.record_generation.next().unwrap();
+    // Moved records follow the destination's policy (new namespaces use
+    // explicit feedback); clock, stability and history are unchanged.
+    let moved = &after.schema.as_ref().unwrap().lifecycle;
+    schema.lifecycle.lifecycle_version = moved.lifecycle_version;
+    schema.lifecycle.policy_revision = moved.policy_revision;
     assert_eq!(expected.encode().unwrap(), after.encode().unwrap());
 }
 
@@ -868,37 +873,32 @@ async fn move_after_certification_cutover_survives_numeric_and_lifecycle_policy_
         &cutover.namespace_name,
         "moved-certified",
     );
-    let before_rejection = session.engine.control_state().unwrap();
-    assert!(matches!(
-        move_records(&mut session.engine, input.clone(), &provider).await,
-        Err(StorageError::InvalidMutation(_))
-    ));
-    assert_eq!(session.engine.control_state().unwrap(), before_rejection);
+    // The destination is new (explicit feedback, revision 0) while the source
+    // carries its own revision: moved records follow the destination's policy.
+    move_records(&mut session.engine, input.clone(), &provider)
+        .await
+        .unwrap();
     let destination = session
         .engine
         .get_namespace_by_name("moved-certified")
         .unwrap()
         .unwrap();
-    let alignment = crate::storage::lifecycle_migration::LifecycleMigrationOptions {
-        expected_source: before_rejection.generation_ref(),
-        namespace_id: destination.id,
-        expected_policy_revision: destination.schema.as_ref().unwrap().policy_revision,
-        target: crate::model::schema::LifecycleVersion::ExplicitFeedbackV2,
-        idempotency_key: "align-destination-policy".into(),
-    };
-    drop(session);
-    let aligned = root.path().join("aligned");
-    crate::storage::lifecycle_migration::migrate_lifecycle(&path, &aligned, &alignment).unwrap();
-    let path = aligned;
-    let mut session = NativeLifecycleSession::open(
-        &path,
-        NativePolicyInputs::default(),
-        Arc::new(crate::time::ManualClock::new(100_000_000)),
-    )
-    .unwrap();
-    move_records(&mut session.engine, input.clone(), &provider)
-        .await
-        .unwrap();
+    let destination_schema = destination.schema.as_ref().unwrap();
+    for id in &ids {
+        let fields = session
+            .engine
+            .get_record(*id)
+            .unwrap()
+            .unwrap()
+            .schema
+            .unwrap()
+            .lifecycle;
+        assert_eq!(
+            fields.lifecycle_version,
+            destination_schema.lifecycle_version
+        );
+        assert_eq!(fields.policy_revision, destination_schema.policy_revision);
+    }
     let ns = session
         .engine
         .get_namespace_by_name("moved-certified")
