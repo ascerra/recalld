@@ -96,8 +96,8 @@ function freezeOffset() {
   offset = [cx / (nodes.length || 1), cy / (nodes.length || 1)];
 }
 
-/** User-chosen room between memories: 1 is the default, larger spreads the map. */
-let spacing = 1;
+/** Room between memories: 3× the original compact layout, so clusters stay readable. */
+const spacing = 3;
 
 const collideRadius = (d: Node) => (d.gone ? 0 : (d.r * 2.5 + 10) * spacing);
 
@@ -212,7 +212,6 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     }
     pinned = [];
     links = Array.from(m.src, (s, k) => ({ source: s, target: m.dst[k], w: m.weight[k] }));
-    spacing = m.spacing;
     // Room to read: strong repulsion, long weak links, generous spacing.
     // Hubs push harder for room and pull harder toward the center, so they
     // anchor their clusters and sparse memories drift outward.
@@ -289,15 +288,6 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     (sim.force('link') as ReturnType<typeof forceLink<Node, (typeof links)[number]>>).links(links);
     sim.nodes(nodes);
     reheatAround(node, 0.12);
-  } else if (m.type === 'spacing' && sim) {
-    if (m.value === spacing) return;
-    spacing = m.value;
-    applySpacing();
-    // The whole map spreads (or gathers) slowly, as when switching views.
-    release();
-    fluid();
-    sim.alpha(Math.max(sim.alpha(), 0.5));
-    run();
   } else if (m.type === 'pause') {
     paused = true;
   } else if (m.type === 'resume') {

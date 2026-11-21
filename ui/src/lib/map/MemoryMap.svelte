@@ -27,7 +27,6 @@
     scopeKey,
     selectedId = null,
     projectionDays = 0,
-    spacing = 1,
     phases,
     edgeTypes,
     highlighted = [],
@@ -40,8 +39,6 @@
     scopeKey: string | null;
     selectedId?: string | null;
     projectionDays?: number;
-    /** Room between memories: 1 is the default, up to 3. */
-    spacing?: number;
     phases: Set<number>;
     edgeTypes: Set<number>;
     /** Ids labeled by default (the current or most recent recall's results). */
@@ -70,8 +67,6 @@
   let summaries = $state<Map<string, string | null>>(new Map());
   let sigma: Sigma | null = null;
   let worker: Worker | null = null;
-  /** The spacing the running layout uses; slider changes are sent once each. */
-  let sentSpacing = 1;
   let graph: Graph | null = null;
   let theme: MapTheme;
   let hovered: string | null = null;
@@ -178,15 +173,6 @@
       graph!.setEdgeAttribute(id, 'visibility', show ? 'visible' : 'hidden');
     });
   }
-
-  // The spacing slider spreads or gathers the running layout.
-  $effect(() => {
-    const value = spacing;
-    if (worker && value !== sentSpacing) {
-      sentSpacing = value;
-      worker.postMessage({ type: 'spacing', value } satisfies ToWorker);
-    }
-  });
 
   $effect(() => {
     // Re-run when any of these change.
@@ -787,9 +773,9 @@
     // sit on the full map, then drifts into its own layout slowly.
     let reflow = false;
     const positions = async () => {
-      const own = await loadPositions(scopeKey, spacing);
+      const own = await loadPositions(scopeKey);
       if (scopeKey === null || own.size >= snapshot.ids.length / 2) return own;
-      const all = await loadPositions(null, spacing);
+      const all = await loadPositions(null);
       for (const id of snapshot.ids) {
         const p = all.get(id);
         if (p && !own.has(id)) {
@@ -971,7 +957,7 @@
             frozen = true;
             sigma!.setSetting('autoRescale', 'once');
           }
-          savePositions(scopeKey, snapshot.ids, e.data.x, e.data.y, spacing);
+          savePositions(scopeKey, snapshot.ids, e.data.x, e.data.y);
           perf.__recalldSettled = true;
           onsettled?.();
         }
@@ -999,7 +985,7 @@
       liveIndex.clear();
       const src = snapshot.src.slice(), dst = snapshot.dst.slice(), weight = snapshot.weight.slice(), degree = snapshot.degree.slice();
       worker.postMessage(
-        { type: 'init', n: snapshot.ids.length, src, dst, weight, degree, x: built.x, y: built.y, known: built.known, maxDegree: Math.max(1, ...degree), reflow, spacing: (sentSpacing = spacing) } satisfies ToWorker,
+        { type: 'init', n: snapshot.ids.length, src, dst, weight, degree, x: built.x, y: built.y, known: built.known, maxDegree: Math.max(1, ...degree), reflow } satisfies ToWorker,
         [src.buffer, dst.buffer, weight.buffer, degree.buffer, built.x.buffer, built.y.buffer, built.known.buffer],
       );
     });
