@@ -96,7 +96,24 @@ function freezeOffset() {
   offset = [cx / (nodes.length || 1), cy / (nodes.length || 1)];
 }
 
-const collideRadius = (d: Node) => (d.gone ? 0 : d.r * 2.5 + 10);
+/** User-chosen room between memories: 1 is the default, larger spreads the map. */
+let spacing = 1;
+
+const collideRadius = (d: Node) => (d.gone ? 0 : (d.r * 2.5 + 10) * spacing);
+
+/** Every distance-like force scales with `spacing`; the pull to the center
+ *  weakens with it so the map can actually grow. */
+function applySpacing() {
+  if (!sim) return;
+  sim
+    .force('charge', forceManyBody<Node>().strength((d) => (d.gone ? 0 : (-90 - 160 * d.hub) * spacing * spacing)).theta(0.9).distanceMax(500 * spacing))
+    .force('link', forceLink<Node, (typeof links)[number]>(links).id((d) => d.i).distance(70 * spacing)
+      // d3's own normalization: a memory with many links isn't pulled in many times as hard.
+      .strength((l) => (0.3 + 0.7 * l.w) / Math.min((l.source as unknown as Node).deg, (l.target as unknown as Node).deg)))
+    .force('collide', forceCollide<Node>(collideRadius).iterations(2))
+    .force('x', forceX<Node>(0).strength((d) => (0.035 + 0.04 * d.hub) / spacing))
+    .force('y', forceY<Node>(0).strength((d) => (0.035 + 0.04 * d.hub) / spacing));
+}
 
 /** Collision as a hard constraint: moves overlapping nodes apart by position,
  *  leaving every other node and all velocities untouched. Runs after each
@@ -195,18 +212,12 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     }
     pinned = [];
     links = Array.from(m.src, (s, k) => ({ source: s, target: m.dst[k], w: m.weight[k] }));
-    sim = forceSimulation(nodes)
-      // Room to read: strong repulsion, long weak links, generous spacing.
-      // Hubs push harder for room and pull harder toward the center, so they
-      // anchor their clusters and sparse memories drift outward.
-      .force('charge', forceManyBody<Node>().strength((d) => (d.gone ? 0 : -90 - 160 * d.hub)).theta(0.9).distanceMax(500))
-      .force('link', forceLink<Node, (typeof links)[number]>(links).id((d) => d.i).distance(70)
-        // d3's own normalization: a memory with many links isn't pulled in many times as hard.
-        .strength((l) => (0.3 + 0.7 * l.w) / Math.min((l.source as unknown as Node).deg, (l.target as unknown as Node).deg)))
-      .force('collide', forceCollide<Node>(collideRadius).iterations(2))
-      .force('x', forceX<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
-      .force('y', forceY<Node>(0).strength((d) => 0.035 + 0.04 * d.hub))
-      .stop();
+    spacing = m.spacing;
+    // Room to read: strong repulsion, long weak links, generous spacing.
+    // Hubs push harder for room and pull harder toward the center, so they
+    // anchor their clusters and sparse memories drift outward.
+    sim = forceSimulation(nodes).stop();
+    applySpacing();
     // Cached layouts open settled: barely reheat; a fully new one starts hot.
     sim.alpha(unknown.length === 0 ? 0 : anyKnown ? Math.min(0.3, 0.05 + unknown.length / m.n) : 1);
     paced = false;
@@ -278,6 +289,15 @@ self.onmessage = (e: MessageEvent<ToWorker>) => {
     (sim.force('link') as ReturnType<typeof forceLink<Node, (typeof links)[number]>>).links(links);
     sim.nodes(nodes);
     reheatAround(node, 0.12);
+  } else if (m.type === 'spacing' && sim) {
+    if (m.value === spacing) return;
+    spacing = m.value;
+    applySpacing();
+    // The whole map spreads (or gathers) slowly, as when switching views.
+    release();
+    fluid();
+    sim.alpha(Math.max(sim.alpha(), 0.5));
+    run();
   } else if (m.type === 'pause') {
     paused = true;
   } else if (m.type === 'resume') {
