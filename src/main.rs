@@ -104,13 +104,20 @@ enum Command {
         historical: bool,
     },
 
-    /// Preview or explicitly migrate an offline namespace lifecycle policy
+    /// Move namespaces to the explicit-feedback lifecycle (stop the daemon first)
+    ///
+    /// `preview` and `migrate` work on the configured store. The flag form
+    /// below runs one raw LifecycleMigrationOptions request instead.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Lifecycle {
-        #[arg(long)]
-        source: std::path::PathBuf,
+        #[command(subcommand)]
+        action: Option<recalld::cli::lifecycle::LifecycleCommand>,
+        /// Stopped store directory for a raw request
+        #[arg(long, required = true)]
+        source: Option<std::path::PathBuf>,
         /// JSON LifecycleMigrationOptions, including expected source and policy revision
-        #[arg(long)]
-        request: std::path::PathBuf,
+        #[arg(long, required = true)]
+        request: Option<std::path::PathBuf>,
         /// Fresh cutover destination, or the exact destination to reconcile a retry
         #[arg(
             long,
@@ -335,6 +342,15 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         }
+        // Stdout carries the preview and next steps; only warnings go to stderr.
+        Command::Lifecycle {
+            action: Some(_), ..
+        } => {
+            if let Err(e) = init_tracing("warn", false, true) {
+                eprintln!("fatal: failed to initialize tracing: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
         Command::Backup { .. } | Command::Restore { .. } | Command::Lifecycle { .. } => {
             if let Err(e) = init_tracing("info", false, false) {
                 eprintln!("fatal: failed to initialize tracing: {e}");
@@ -408,10 +424,33 @@ async fn async_main(cli: Cli) -> ExitCode {
             historical,
         } => run_restore_command(loaded.config, from, force, no_stop_daemon, historical).await,
         Command::Lifecycle {
-            source,
-            request,
+            action: Some(action),
+            ..
+        } => {
+            let mut config = loaded.config;
+            let result = container_layout(&mut config, false)
+                .map_err(Into::into)
+                .and_then(|_layout| recalld::cli::lifecycle::run(&config, action));
+            match result {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("lifecycle failed; the store is unchanged: {error}");
+                    if matches!(
+                        error.downcast_ref::<recalld::storage::StorageError>(),
+                        Some(recalld::storage::StorageError::DatabaseLocked)
+                    ) {
+                        eprintln!("Stop the daemon first: recalld daemon stop");
+                    }
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Command::Lifecycle {
+            source: Some(source),
+            request: Some(request),
             destination,
             preview_at,
+            ..
         } => {
             let result = (|| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
                 use recalld::storage::lifecycle_migration::{
@@ -449,6 +488,9 @@ async fn async_main(cli: Cli) -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
+        }
+        Command::Lifecycle { .. } => {
+            unreachable!("clap requires a subcommand or --source and --request")
         }
         Command::RepairLegacyVectors { .. } => unreachable!("dispatched before config discovery"),
         #[cfg(feature = "ui")]

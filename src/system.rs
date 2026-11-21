@@ -1946,5 +1946,9 @@ mod tests {
 mod inherited_policy_tests;
 
 #[cfg(test)]
+#[path = "system_explicit_feedback_tests.rs"]
+mod explicit_feedback_tests;
+
+#[cfg(test)]
 #[path = "system_heterogeneous_tests.rs"]
 mod heterogeneous_tests;

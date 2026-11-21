@@ -13,6 +13,24 @@ use super::vector_certification::{DocumentEvidence, DocumentSource};
 use crate::model::MemoryId;
 use crate::model::{NamespaceId, schema::EmbeddingBinding};
 
+/// A moved record takes its destination's lifecycle and policy revision, as a
+/// lifecycle migration would; its decay clock and stability are unchanged. On
+/// the legacy lifecycle, last access is the decay clock.
+pub(crate) fn follow_destination_policy(
+    fields: &mut crate::model::schema::LifecycleFields,
+    last_accessed_at: &mut i64,
+    version: crate::model::schema::LifecycleVersion,
+    revision: control::Generation,
+) {
+    if fields.lifecycle_version != version
+        && version == crate::model::schema::LifecycleVersion::LegacyAccessV1
+    {
+        *last_accessed_at = fields.decay_anchor_at;
+    }
+    fields.lifecycle_version = version;
+    fields.policy_revision = revision;
+}
+
 pub(crate) const MAX_MOVE_PROOF_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const MAX_MOVE_TEXT_BYTES: usize = 16 * 1024 * 1024;
 
@@ -82,8 +100,6 @@ impl NativeMoveWrite {
             || &self.destination_profile_id != profile_id
             || self.capture.store_id != receipt.store_id
             || self.capture.generation.next()? != receipt.committed_generation
-            || self.source.schema.lifecycle_version != self.destination.schema.lifecycle_version
-            || self.source.schema.policy_revision != self.destination.schema.policy_revision
             || !(1..=100).contains(&self.ids.len())
             || self.records.len() != self.ids.len()
             || self.ids.iter().collect::<BTreeSet<_>>().len() != self.ids.len()
@@ -118,6 +134,12 @@ impl NativeMoveWrite {
             expected.content.embedding_origin = None;
             expected.lifecycle.lifecycle.record_generation =
                 before.lifecycle.lifecycle.record_generation.next()?;
+            follow_destination_policy(
+                &mut expected.lifecycle.lifecycle,
+                &mut expected.lifecycle.last_accessed_at,
+                self.destination.schema.lifecycle_version,
+                self.destination.schema.policy_revision,
+            );
             if *id == MemoryId::nil()
                 || *id != change.memory_id
                 || before.content.vector.is_none()
@@ -233,6 +255,42 @@ mod request_tests {
             change(&mut v);
             assert!(v.validate().is_err());
         }
+    }
+
+    #[test]
+    fn moved_records_follow_the_destination_policy() {
+        use crate::model::schema::{LifecycleFields, LifecycleVersion, TimestampOrigin};
+        let mut fields = LifecycleFields {
+            observed_at: 1,
+            retrieved_at: Some(9),
+            reinforced_at: None,
+            decay_anchor_at: 5,
+            lifecycle_version: LifecycleVersion::ExplicitFeedbackV2,
+            lifecycle_updated_at: 9,
+            timestamp_origin: TimestampOrigin::Native,
+            phase_changed_at: 1,
+            policy_revision: control::Generation::default(),
+            record_generation: control::Generation::default(),
+        };
+        let revision = control::Generation::default().next().unwrap();
+        let mut last = 9;
+        let mut explicit = fields.clone();
+        follow_destination_policy(
+            &mut explicit,
+            &mut last,
+            LifecycleVersion::ExplicitFeedbackV2,
+            revision,
+        );
+        assert_eq!((explicit.policy_revision, last), (revision, 9));
+        // Legacy recency is the decay clock, which never moves.
+        follow_destination_policy(
+            &mut fields,
+            &mut last,
+            LifecycleVersion::LegacyAccessV1,
+            revision,
+        );
+        assert_eq!(fields.lifecycle_version, LifecycleVersion::LegacyAccessV1);
+        assert_eq!((fields.decay_anchor_at, last), (5, 5));
     }
 
     #[test]

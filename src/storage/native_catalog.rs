@@ -8,9 +8,14 @@ use super::native_lifecycle::{FiniteF32, invalid};
 #[cfg(test)]
 use super::{StorageEngine, control::MutationScope};
 use crate::model::schema::{
-    BindingProvenance, EmbeddingBinding, EmbeddingProfile, NamespaceSchemaV2,
+    BindingProvenance, EmbeddingBinding, EmbeddingProfile, LifecycleVersion, NamespaceSchemaV2,
 };
 use crate::model::{NamespaceConfig, NamespaceId};
+
+/// New namespaces use explicit feedback: retrieval leaves the decay clock alone
+/// and only `reinforce_memory` grows stability (#250). Existing namespaces keep
+/// their recorded lifecycle until `recalld lifecycle migrate` changes it.
+pub(crate) const NEW_NAMESPACE_LIFECYCLE: LifecycleVersion = LifecycleVersion::ExplicitFeedbackV2;
 
 /// Original caller selectors. A profile ID selects the active configuration;
 /// callers cannot supply a descriptor as evidence of the active provider.
@@ -110,6 +115,7 @@ impl NativeNamespaceInput {
         config.created_at = created_at;
         config.embedding_dim = profile.dimension;
         let mut schema = NamespaceSchemaV2::from_legacy();
+        schema.lifecycle_version = NEW_NAMESPACE_LIFECYCLE;
         schema.embedding_binding = EmbeddingBinding::Bound {
             profile_id,
             descriptor: profile.clone(),
@@ -188,8 +194,21 @@ pub struct NativeNamespaceCreated {
         deserialize_with = "super::request_context::deserialize_present"
     )]
     pub inherited_decay: Option<super::inherited_policy::InheritedDecayBinding>,
+    /// Absent from receipts written before new namespaces defaulted to
+    /// explicit feedback; those namespaces were created on the legacy lifecycle.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "super::request_context::deserialize_present"
+    )]
+    pub lifecycle_version: Option<LifecycleVersion>,
 }
 impl NativeNamespaceCreated {
+    /// The lifecycle at policy revision zero, before any explicit migration.
+    pub(crate) fn initial_lifecycle(&self) -> LifecycleVersion {
+        self.lifecycle_version
+            .unwrap_or(LifecycleVersion::LegacyAccessV1)
+    }
     pub(crate) fn namespace(&self) -> Result<NamespaceConfig, StorageError> {
         let input = NativeNamespaceInput {
             name: self.name.clone(),
@@ -203,6 +222,7 @@ impl NativeNamespaceCreated {
         ns.id = self.namespace_id;
         self.policy.apply(&mut ns);
         ns.schema.as_mut().unwrap().inherited_decay = self.inherited_decay.clone();
+        ns.schema.as_mut().unwrap().lifecycle_version = self.initial_lifecycle();
         if let Some(certification) = &self.vector_certification {
             ns.schema.as_mut().unwrap().vector_certification = Some(certification.clone());
             ns.schema.as_mut().unwrap().required_features =
@@ -254,7 +274,7 @@ impl NativeNamespaceCreated {
             .as_mut()
             .ok_or_else(|| invalid("native namespace schema missing"))?;
         // The existing explicit lifecycle migration proves these two fields.
-        schema.lifecycle_version = crate::model::schema::LifecycleVersion::LegacyAccessV1;
+        schema.lifecycle_version = self.initial_lifecycle();
         schema.policy_revision = Generation::default();
         Ok(control::encode(&current)? == control::encode(&expected)?)
     }
