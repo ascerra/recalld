@@ -390,9 +390,16 @@ running process but could not be persisted, so it will be lost on restart.
 `failed` means no edge exists; the memory was still stored.
 
 At recall, a superseded memory is replaced by its replacement **only when the
-replacement passes the query's own filters** -- namespace above all. If it does
-not, the original is returned instead, so a result is never dropped with nothing
-in its place.
+replacement passes the query's own filters** -- namespace above all. A chain
+(A superseded by B, B by C) collapses to its newest version that passes them:
+C, or B when C is deleted, a ghost the query did not ask for, or filtered out.
+If no newer version passes, the original is returned instead, so a result is
+never dropped with nothing in its place. Two versions of one chain are never
+returned together. A superseded memory stays readable with `get_memory`.
+
+Only a real link counts. A memory whose summary merely contains supersedes
+text (for example tool-call markup that a client serialized into the summary)
+has no link and is not replaced.
 
 ---
 
@@ -532,7 +539,7 @@ A result entry carries `nearDuplicates` on the same terms as `store_memory` -- `
 
 ### recall_memories
 
-Search memories using natural language. Results are ranked by semantic similarity and memory strength.
+Search memories using natural language. Results are ranked by relevance to the query (semantic similarity, with keyword and entity matches as smaller boosts). Memory strength does not reorder direct matches; it affects results only through `minStrength`, decay phase, and the score of memories found by entity or graph links alone.
 
 #### Parameters
 
