@@ -10,6 +10,7 @@
 
 ### Local web UI
 
+- Summary and Ghost memories on the map are lighter solid shades that stay clearly visible: the faintest Summary shade is stronger, and Ghosts get a pale fill and a solid outline instead of an almost invisible one.
 - The memory map has a **Spacing** slider (1× to 3×) that spreads memories further apart. It scales link length, repulsion and the no-overlap distance together; each spacing keeps its own saved layout, and the choice is remembered.
 - Selecting a memory on the map opens the same card as an opened Explore row, popping up at the bottom of the map instead of a side panel. Esc or its close button dismisses it, and the selected memory stays in view above it.
 - Memories on the map are always solid, with stage and fading shown as lighter shades instead of transparency, so links no longer show through nodes.
