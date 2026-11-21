@@ -584,10 +584,41 @@
     const cam = sigma!.viewportToFramedGraph(c);
     sigma!.getCamera().animate({ x: cam.x, y: cam.y, ratio: Math.max(0.15, Math.min(1, pts.length / 120)) }, { duration: 300 });
   }
-  export function center(id: string) {
+  /** A full redraw, as a container resize does. Camera moves while the memory
+   *  card is open could leave parts of the WebGL frame stale otherwise. */
+  export function redraw() {
+    redrawAll();
+  }
+  const redrawAll = () => {
+    if (!sigma) return;
+    sigma.resize();
+    sigma.refresh();
+  };
+
+  /** Center `id`, zooming in a little. `covered` px at the bottom are hidden
+   *  (by the memory card), so it centers in the visible area above them. */
+  export function center(id: string, covered = 0) {
     if (!graph?.hasNode(id) || !sigma) return;
-    const p = sigma.viewportToFramedGraph(sigma.graphToViewport(graph.getNodeAttributes(id) as { x: number; y: number }));
-    sigma.getCamera().animate({ x: p.x, y: p.y, ratio: Math.min(sigma.getCamera().getState().ratio, 0.5) }, { duration: 300 });
+    const cam = sigma.getCamera().getState();
+    const ratio = Math.min(cam.ratio, 0.5);
+    const v = sigma.graphToViewport(graph.getNodeAttributes(id) as { x: number; y: number });
+    // Shift the camera down by half the covered height, measured at the new zoom.
+    const shift = (sigma.viewportToFramedGraph({ x: 0, y: covered / 2 }).y - sigma.viewportToFramedGraph({ x: 0, y: 0 }).y) * (ratio / cam.ratio);
+    const p = sigma.viewportToFramedGraph(v);
+    // Redraw once the move ends: overlapping camera animations could leave the
+    // WebGL frame a step behind the label overlay.
+    void sigma.getCamera().animate({ x: p.x, y: p.y + shift, ratio }, { duration: 300 }).then(redrawAll);
+  }
+
+  /** Pan just enough that `id` isn't under the bottom `covered` px. */
+  export function reveal(id: string, covered: number) {
+    if (!graph?.hasNode(id) || !sigma || covered <= 0) return;
+    const v = sigma.graphToViewport(drawn(id));
+    const limit = container.clientHeight - covered - 48;
+    if (v.y <= limit) return;
+    const cam = sigma.getCamera().getState();
+    const a = sigma.viewportToFramedGraph({ x: 0, y: v.y }), b = sigma.viewportToFramedGraph({ x: 0, y: limit });
+    void sigma.getCamera().animate({ x: cam.x, y: cam.y + (a.y - b.y) }, { duration: 300 }).then(redrawAll);
   }
   export function getSigma() {
     return sigma;

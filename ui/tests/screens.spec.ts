@@ -37,6 +37,8 @@ test('Memory map with a memory selected', async ({ page }) => {
   await page.getByRole('button', { name: 'Connection bonus keeps well-linked memories in Full' }).click();
   await page.getByRole('button', { name: 'Show on map' }).click();
   await page.waitForFunction(() => (window as unknown as { __recalldSettled?: boolean }).__recalldSettled === true, null, { timeout: 60_000 });
+  // Park the pointer away from the map so no node is hovered.
+  await page.mouse.move(0, 0);
   await page.waitForTimeout(1000); // the 300 ms centering animation
   await shot(page, 'map-selected');
 });
