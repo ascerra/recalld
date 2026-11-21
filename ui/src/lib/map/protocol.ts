@@ -14,8 +14,6 @@ export type ToWorker =
       maxDegree: number;
       /** Positions came from another view: settle slowly, as if in thick fluid. */
       reflow: boolean;
-      /** Room between memories: 1 is the default, up to 3. */
-      spacing: number;
     }
   | { type: 'drag'; phase: 'start' | 'move' | 'end'; index: number; x: number; y: number }
   /** A memory stored while the map is open; it takes the next index. */
@@ -23,8 +21,6 @@ export type ToWorker =
   /** A memory forgotten while the map is open: its neighbors close the gap. */
   | { type: 'remove'; index: number }
   /** The tab is hidden / visible again: hold the simulation meanwhile. */
-  /** The user changed the spacing slider: spread or gather the whole map. */
-  | { type: 'spacing'; value: number }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'stop' };
@@ -50,4 +46,4 @@ export const displaySize = (degree: number, strength: number) =>
   DRAW * (2.5 + 9.5 * Math.pow(0.6 * Math.min(1, hubness(degree)) + 0.4 * Math.min(1, Math.max(0, strength)), 1.6));
 /** Drawn radius per size unit, in layout units. Kept below the layout's
  *  collision radius (r·2.5 + 10), so drawn nodes can never overlap. */
-export const DRAW = 2.2;
+export const DRAW = 2.5;

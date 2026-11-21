@@ -85,25 +85,6 @@
 
   let days = $state(0);
 
-  // Room between memories on the map (1× default, up to 3×), remembered per browser.
-  const SPACING_KEY = 'recalld.map.spacing';
-  let spacing = $state(
-    (() => {
-      try {
-        const v = Number(localStorage.getItem(SPACING_KEY));
-        return v >= 1 && v <= 3 ? v : 1;
-      } catch {
-        return 1;
-      }
-    })(),
-  );
-  $effect(() => {
-    try {
-      localStorage.setItem(SPACING_KEY, String(spacing));
-    } catch {
-      /* storage unavailable: keep the in-memory choice */
-    }
-  });
   const daysLabel = $derived(days === 0 ? 'now' : days < 60 ? `+${days} d` : `+${Math.round(days / 30)} mo`);
 
   let map: { zoomIn(): void; zoomOut(): void; fit(): void; focusNeighborhood(id: string): void; exitFocus(): void; center(id: string, covered?: number): void; reveal(id: string, covered: number): void; redraw(): void } | undefined = $state();
@@ -186,11 +167,6 @@
         {#each WINDOWS as w (w.days)}<option value={w.days}>{w.label}</option>{/each}
       </select>
     </label>
-    <div class="scrubber spacing">
-      <label for="map-spacing">Spacing</label>
-      <input id="map-spacing" type="range" min="1" max="3" step="0.25" bind:value={spacing} aria-valuetext="{spacing}×" />
-      <span class="mono when">{spacing}×</span>
-    </div>
     <div class="scrubber">
       <label for="decay-scrub">Decay</label>
       <input id="decay-scrub" type="range" min="0" max="365" step="1" bind:value={days} aria-valuetext={daysLabel} />
@@ -229,7 +205,6 @@
             scopeKey={scope.current}
             selectedId={selection.id}
             projectionDays={days}
-            {spacing}
             {phases}
             {edgeTypes}
             {onsettled}
@@ -300,12 +275,6 @@
     align-items: center;
     gap: calc(var(--space-2) + var(--space-1) / 2);
     margin-left: auto;
-  }
-  .scrubber.spacing + .scrubber {
-    margin-left: var(--space-4);
-  }
-  .scrubber.spacing input {
-    width: calc(var(--space-8) * 2.5);
   }
   .scrubber label {
     font-size: var(--text-control);

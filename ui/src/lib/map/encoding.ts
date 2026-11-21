@@ -21,15 +21,15 @@ export function nodeAttributes(theme: MapTheme, phase: number, degree: number, p
       return { size, color: solid(theme.canvas, mix(theme.node, theme.nodeFading, t), 0.94 - 0.2 * Math.min(1, t)), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
     }
     case 2: {
-      // Summary: R 0.7 → 0.3 runs moss → pale sage, a lighter shade but always
-      // clearly visible on the canvas (strength is computed live, so most
-      // Summary memories sit toward the pale end).
-      const t = (0.7 - r) / 0.4;
-      return { size, color: solid(theme.canvas, mix(theme.nodeFading, theme.nodeSummary, t), 0.82 - 0.22 * Math.min(1, Math.max(0, t))), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
+      // Summary: R 0.7 → 0.3 runs moss → sage, lighter than Full but never
+      // close to the canvas (strength is computed live, so most Summary
+      // memories sit toward the light end).
+      const t = Math.min(1, Math.max(0, (0.7 - r) / 0.4));
+      return { size, color: solid(theme.canvas, mix(theme.nodeFading, theme.nodeSummary, 0.6 * t), 0.9 - 0.15 * t), ring: alpha(theme.node, 0), visibility: 'visible' as const, permastore };
     }
     case 3:
-      // Ghost: a pale shade with a solid outline, visible but clearly faded.
-      return { size, color: solid(theme.canvas, theme.nodeGhost, 0.25), ring: solid(theme.canvas, theme.nodeGhost, 0.9), visibility: 'visible' as const, permastore };
+      // Ghost: the lightest stage, with a solid outline, still well clear of the canvas.
+      return { size, color: solid(theme.canvas, theme.nodeGhost, 0.45), ring: theme.nodeGhost, visibility: 'visible' as const, permastore };
     default:
       // Tombstones and memories the decay projection deletes.
       return { size: 1.6, color: alpha(theme.nodeGhost, 0.35), ring: alpha(theme.node, 0), visibility: 'hidden' as const, permastore: false };
