@@ -411,17 +411,12 @@ async fn native_sweep_rechecks_donor_and_fan_after_capture_without_resampling_cl
         assert!(!result.compaction_triggered);
         assert_eq!(c.calls.load(Ordering::SeqCst), calls);
         let after = row(&f, id);
+        // At 4.5 days raw strength (0.697) is below the Summary threshold, so
+        // only the connection bonus at the captured clock keeps the memory
+        // Full. With its phase unchanged the pass writes nothing (#239).
         assert_eq!(after.phase, DecayPhase::Full);
-        assert!(after.decay_strength > after.strength);
-        assert_eq!(
-            after
-                .schema
-                .as_ref()
-                .unwrap()
-                .lifecycle
-                .lifecycle_updated_at,
-            now
-        );
+        assert!(result.unchanged_skipped >= 1, "{result:?}");
+        assert_eq!(after.encode().unwrap(), before.encode().unwrap());
         retained(&before, &after);
         ready(&f).await;
     }
@@ -675,8 +670,8 @@ async fn native_timer_pass_publishes_per_batch_and_checks_each_write_against_its
     };
     let before = scans();
     let loads_before = edge_loads();
-    // One hour on, every strength moves and no phase changes, so the pass
-    // commits every memory: the five here plus the fixture's parent.
+    // Thirty days on, every memory changes phase, so the pass commits every
+    // memory: the five here plus the fixture's parent.
     let result = DecaySweepRunner::execute_sweep_with_work(
         &SweepConfig {
             write_batch_size: 2,
@@ -688,7 +683,7 @@ async fn native_timer_pass_publishes_per_batch_and_checks_each_write_against_its
         &f.graph,
         &f.cache,
         1.,
-        Some(3000 + DAY / 24),
+        Some(3000 + 30 * DAY),
         None,
         Some(&completion(&f)),
     )
@@ -700,14 +695,17 @@ async fn native_timer_pass_publishes_per_batch_and_checks_each_write_against_its
     );
     assert_eq!(result.memories_scanned, ids.len() as u64 + 1);
     assert_eq!(result.unchanged_skipped, 0);
-    assert_eq!(result.full_to_summary, 0);
+    assert_eq!(result.full_to_summary, ids.len() as u64 + 1);
     // A publication reads every record once. Six commits in batches of two
     // publish after the first (on its own), the third, the fifth and the
-    // last. Applying each write reads only that write's record.
-    assert_eq!(scanned, 4);
-    // Every edge is read once per publication too, and never by a commit:
-    // each reads only its memory's neighbourhood (#215).
-    assert_eq!(edge_loads() - loads_before, 4);
+    // last. Applying each write reads only that write's record. The text
+    // compaction that follows a Full -> Summary pass adds two reads of its
+    // own, whatever the batch size.
+    assert!(result.compaction_triggered);
+    assert_eq!(scanned, 4 + 2);
+    // Every edge is read once per publication too (and once by compaction),
+    // and never by a commit: each reads only its memory's neighbourhood (#215).
+    assert_eq!(edge_loads() - loads_before, 4 + 1);
     ready(&f).await;
     assert!(
         f.storage
@@ -720,8 +718,91 @@ async fn native_timer_pass_publishes_per_batch_and_checks_each_write_against_its
     );
     for id in &ids {
         let record = row(&f, *id);
-        assert_eq!(record.phase, DecayPhase::Full);
+        assert_eq!(record.phase, DecayPhase::Summary);
         assert!(record.strength < 1., "strength was not materialized");
+    }
+}
+
+fn receipts(f: &Fixture) -> u64 {
+    use redb::ReadableTableMetadata as _;
+    let storage = f.storage.read().unwrap();
+    let read = storage.meta_store().db.begin_read().unwrap();
+    read.open_table(crate::storage::control::RECEIPTS)
+        .unwrap()
+        .len()
+        .unwrap()
+}
+
+async fn timer_sweep(f: &Fixture, at: i64) -> SweepResult {
+    let result = DecaySweepRunner::execute_sweep_with_work(
+        &SweepConfig::default(),
+        &crate::decay::DecayConfig::default(),
+        &Default::default(),
+        &f.storage,
+        &f.graph,
+        &f.cache,
+        1.,
+        Some(at),
+        None,
+        Some(&completion(f)),
+    )
+    .await;
+    assert!(
+        result.errors.is_empty() && result.publication_error.is_none(),
+        "{result:?}"
+    );
+    result
+}
+
+// #239: every committed write keeps a receipt for the life of the store, so a
+// sweep writes a memory only when its phase changes; strength alone is
+// recomputed by readers. Phase changes still follow the computed strength.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_sweep_writes_only_phase_changes() {
+    let (f, ids) = setup_memories(5);
+    completion(&f).rebuild_all().await.unwrap();
+    ready(&f).await;
+    let all = ids.len() as u64 + 1;
+    // Hourly passes, then daily ones to three days: strength falls to about
+    // 0.77 but no phase changes, so nothing is written.
+    let before = receipts(&f);
+    let hours = (1..=6).map(|h| h * DAY / 24);
+    for at in hours.chain([DAY, 2 * DAY, 3 * DAY]) {
+        let result = timer_sweep(&f, 3000 + at).await;
+        assert_eq!(result.unchanged_skipped, all, "{result:?}");
+    }
+    assert_eq!(receipts(&f), before, "strength-only passes wrote receipts");
+    for id in &ids {
+        assert_eq!(row(&f, *id).strength, 1., "strength was written");
+    }
+    // namespace_stats averages the strength computed now, not the stored 1.0.
+    let name = {
+        let namespace = NamespaceId::new(row(&f, ids[0]).namespace_id);
+        let storage = f.storage.read().unwrap();
+        storage.get_namespace(namespace).unwrap().unwrap().name
+    };
+    let clock = Arc::new(crate::time::ManualClock::new(3000 + 3 * DAY));
+    let stats = crate::mcp::bridge::NamespaceRegistry::namespace_stats(
+        &f.namespace_adapter()
+            .with_clock(clock.clone())
+            .with_native_catalog(
+                Arc::new(crate::embedding::PassthroughProvider::new(4)),
+                NativePolicyInputs::default(),
+                clock,
+            ),
+        &name,
+    )
+    .await
+    .unwrap();
+    assert!(stats.avg_strength < 0.95, "{}", stats.avg_strength);
+    // The stored strength is stale, but the phase follows the computed one.
+    let result = timer_sweep(&f, 3000 + 10 * DAY).await;
+    assert!(result.full_to_summary >= ids.len() as u64, "{result:?}");
+    assert!(receipts(&f) - before >= ids.len() as u64);
+    for id in &ids {
+        let record = row(&f, *id);
+        assert_eq!(record.phase, DecayPhase::Summary);
+        assert!(record.strength < 0.7, "{}", record.strength);
     }
 }
 
@@ -734,12 +815,13 @@ async fn native_phase_effect_checked_against_its_own_record_matches_a_full_scan(
     let tracker = f.storage.read().unwrap().meta_store().work_tracker();
     let work = tracker.begin().unwrap();
     let policy = NativePolicyInputs::default();
+    // Ten days on, the memory moves to Summary: a write.
     let capture = f
         .storage
         .read()
         .unwrap()
         .meta_store()
-        .capture_native_decay(id, scope_id(&f, id), &policy, 3000 + DAY / 24)
+        .capture_native_decay(id, scope_id(&f, id), &policy, 3000 + 10 * DAY)
         .unwrap();
     let context = MutationContext {
         store_id: Some(f.storage.read().unwrap().control_state().unwrap().store_id),

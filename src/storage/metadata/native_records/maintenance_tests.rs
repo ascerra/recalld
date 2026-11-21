@@ -248,20 +248,15 @@ fn native_maintenance_rechecks_canonical_donors_and_fan_with_original_clock_for_
         );
         c.set(20_000 * DAY);
         let calls = c.calls.load(Ordering::SeqCst);
-        committed(s.apply_decay(&ctx(&s, &d, "maintain"), &intent).unwrap());
+        // At 4.5 days only the rechecked bonus keeps the target Full. Its phase
+        // is unchanged, so nothing is written: readers compute strength (#239).
+        assert!(matches!(
+            s.apply_decay(&ctx(&s, &d, "maintain"), &intent).unwrap(),
+            NativeDecayResult::Skipped(NativeDecaySkip::Unchanged)
+        ));
         let after = record(&s, id);
         assert_eq!(after.phase, DecayPhase::Full);
-        assert_eq!(after.strength, raw.strength);
-        assert!(after.decay_strength > raw.decay_strength);
-        assert_eq!(
-            after
-                .schema
-                .as_ref()
-                .unwrap()
-                .lifecycle
-                .lifecycle_updated_at,
-            now
-        );
+        assert_eq!(after.encode().unwrap(), before.encode().unwrap());
         assert_eq!(c.calls.load(Ordering::SeqCst), calls);
         immutable_lifecycle(&before, &after);
         drop(s);
