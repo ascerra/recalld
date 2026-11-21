@@ -61,7 +61,7 @@ pub use pipeline::{
     RetrievalSemantics, RifDiagnostics, RifMode, RifProcessor, RifSuppression, ScoreExplanation,
     ScoreFormula, ScoredResult, SemanticsDiagnostics, SemanticsResponse, SourceCoverage,
     SourceResults, StrengthDiagnostics, UnresolvedReason, VectorIndexRegistry, VersionMode,
-    VersionStatus,
+    VersionStatus, project_strengths,
 };
 pub(crate) use pipeline::{
     SelectedSimilarity, SimilarityAlgorithm, SimilarityExclusion, SimilarityExplanation,

@@ -57,10 +57,14 @@ pub(crate) fn inspect_database_copy(
 /// Header inspection is not admission: the selected full validator must run
 /// before any writable canonical open. Do not add another lifetime history scan.
 pub(crate) fn startup_native_format(path: &Path) -> Result<bool, StorageError> {
+    let (_copy, metadata) = inspect_database_copy(&path.join("meta.db"), true)?;
+    native_format_header(&metadata.begin_read()?)
+}
+
+/// Header-only format selection on an inspection transaction. Not admission.
+pub(crate) fn native_format_header(read: &redb::ReadTransaction) -> Result<bool, StorageError> {
     use redb::{MultimapTableHandle, TableHandle};
 
-    let (_copy, metadata) = inspect_database_copy(&path.join("meta.db"), true)?;
-    let read = metadata.begin_read()?;
     let reserved = [
         super::control::CONTROL.name(),
         super::control::RECEIPTS.name(),
@@ -129,7 +133,7 @@ pub(crate) fn preflight_text(path: &Path) -> Result<(), StorageError> {
     {
         return Err(StorageError::RecoveryRequired("schema v2 remains offline until participating writers are enabled; use schema inspect/export".into()));
     }
-    let text = selected_text(path, &read)?;
+    let text = selected_text(path, &read, control.as_ref())?;
     let records = read.open_table(META_TABLE)?;
     let mut decoded = Vec::new();
     for row in records.iter()? {
@@ -149,8 +153,13 @@ pub(crate) fn preflight_text(path: &Path) -> Result<(), StorageError> {
     Ok(())
 }
 
-fn selected_text(path: &Path, read: &redb::ReadTransaction) -> Result<TextStore, StorageError> {
-    match super::metadata::text_generation::read_selection(read)? {
+/// `control` is the result of `control::validate_existing` on this transaction.
+fn selected_text(
+    path: &Path,
+    read: &redb::ReadTransaction,
+    control: Option<&super::control::ControlState>,
+) -> Result<TextStore, StorageError> {
+    match super::metadata::text_generation::read_validated_selection(read, control)? {
         Some(descriptor) => {
             super::text::generation::validate_rejection_gate(path, descriptor.store_id)?;
             TextStore::open_generation(path, &descriptor, false)
@@ -223,13 +232,14 @@ fn validate_snapshot(
     // All canonical validation still precedes writable opens of the originals.
     let (_meta_copy, meta) = inspect_database_copy(&path.join("meta.db"), native_recovery)?;
     let read = meta.begin_read()?;
-    let control = super::control::validate_existing(&read)?;
+    let (control, schema_state) = super::control::validate_existing_with_schema(&read)?;
     if native_recovery {
         let state = control
             .as_ref()
             .ok_or_else(|| StorageError::InvalidControl("native control missing".into()))?;
         if state.control_schema_version != 2
-            || super::metadata::text_generation::read_selection(&read)?.is_none()
+            || super::metadata::text_generation::read_validated_selection(&read, Some(state))?
+                .is_none()
         {
             return Err(StorageError::InvalidControl(
                 "native entry requires gated schema 2".into(),
@@ -270,11 +280,6 @@ fn validate_snapshot(
     } else {
         HashMap::new()
     };
-    let schema_state = control
-        .as_ref()
-        .map(|c| super::canonical_schema::read_state(&read, c))
-        .transpose()?
-        .flatten();
     if control.is_some() {
         read.open_table(super::metadata::NAMESPACE_COUNTER)?;
     }
@@ -342,10 +347,12 @@ fn validate_snapshot(
             VectorStore::open(&dir, config.embedding_dim as usize)?,
         );
     }
-    if let Some(descriptor) = super::metadata::text_generation::read_selection(&read)? {
+    if let Some(descriptor) =
+        super::metadata::text_generation::read_validated_selection(&read, control.as_ref())?
+    {
         inventory.insert(descriptor.filename);
     }
-    let text = selected_text(path, &read)?;
+    let text = selected_text(path, &read, control.as_ref())?;
     let certified_text = if configs.values().any(|ns| {
         ns.schema
             .as_ref()

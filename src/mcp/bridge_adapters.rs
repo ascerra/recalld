@@ -3245,7 +3245,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
             let storage = self.storage.clone();
             let ns_name = name.to_string();
             let inputs = self.policy_inputs.clone();
-            tokio::task::spawn_blocking(move || {
+            let result = tokio::task::spawn_blocking(move || {
                 let storage_r = storage.read().map_err(|e| {
                     bridge::BridgeError::Internal(format!("storage lock poisoned: {e}"))
                 })?;
@@ -3269,6 +3269,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
                 let mut permastore_count: u64 = 0;
                 let mut strength_sum: f64 = 0.0;
                 let mut edge_count: u64 = 0;
+                let mut live = Vec::new();
 
                 for (_id, record) in &all_records {
                     if NamespaceId::new(record.namespace_id) != ns.id {
@@ -3304,6 +3305,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
 
                     strength_sum += record.decay_strength as f64;
                     edge_count += record.edge_count as u64;
+                    live.push(crate::model::CachedRecord::from(record));
                 }
 
                 let avg_strength = if memory_count > 0 {
@@ -3314,7 +3316,7 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
 
                 let vector_bytes = memory_count * ns.embedding_dim as u64 * 4;
 
-                Ok(bridge::NamespaceStats {
+                let stats = bridge::NamespaceStats {
                     name: ns_name,
                     memory_count,
                     tombstone_count,
@@ -3328,10 +3330,31 @@ impl bridge::NamespaceRegistry for McpNamespaceAdapter {
                     edge_count,
                     vector_bytes,
                     policy: bridge::NamespacePolicyView::resolve(&ns, &inputs),
-                })
+                };
+                Ok::<_, bridge::BridgeError>((stats, ns, live))
             })
             .await
-            .map_err(|e| bridge::BridgeError::Internal(format!("blocking task join error: {e}")))?
+            .map_err(|e| {
+                bridge::BridgeError::Internal(format!("blocking task join error: {e}"))
+            })??;
+            let (mut stats, ns, mut live) = result;
+            // The sweep writes strength only with a phase change (#239): average
+            // the strength search reports now, not the stored one.
+            if let Some(catalog) = &self.native_catalog
+                && !live.is_empty()
+            {
+                crate::search::project_strengths(
+                    &ns,
+                    catalog.policy(),
+                    self.clock.now_millis(),
+                    &mut live,
+                    &crate::search::adapters::SharedGraphReader::new(self.graph.clone()),
+                )
+                .map_err(|e| bridge::BridgeError::Storage(e.to_string()))?;
+                stats.avg_strength = (live.iter().map(|r| r.decay_strength as f64).sum::<f64>()
+                    / live.len() as f64) as f32;
+            }
+            Ok(stats)
         }
         .await;
         if effects_stamp(&self.storage).await? != stamp {

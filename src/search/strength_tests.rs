@@ -498,32 +498,58 @@ async fn projected_eligibility_precedes_vector_fts_entity_and_metadata_caps() {
     assert!(out.diagnostics.metadata_candidate_limited);
 }
 
+// #239: the sweep writes strength only with a phase change, so a legacy-access
+// namespace's stored strength is as of its last write. Search filters, scores
+// and reports the strength computed at the query's clock instead.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn legacy_policy_materialized_strength_is_identical_under_both_retrieval_semantics() {
+async fn legacy_policy_projects_unwritten_strength_identically_under_both_retrieval_semantics() {
     let f = offline(2, LifecycleVersion::LegacyAccessV1, |i, r| {
-        r.strength = if i == 0 { 0.8 } else { 0.4 };
-        r.decay_strength = if i == 0 { 0.85 } else { 0.5 };
-        r.stability = 0.01;
+        // Never written since creation; only stability differs.
+        r.stability = if i == 0 { 100. } else { 1. };
     })
     .await;
     let clock = CountingClock::new(0);
     let engine = engine(&f, clock.clone(), &[]);
+    let now = 10 * DAY;
+    clock.now.store(now, Ordering::SeqCst);
+    let policy = crate::decay::lifecycle::EffectiveLifecyclePolicy {
+        config: Default::default(),
+        decay_rate_multiplier: 1.,
+    };
+    let computed = |stability: f32| {
+        crate::decay::lifecycle::project(stability, 0, &policy, now, 0.)
+            .unwrap()
+            .strength
+    };
+    let (strong, weak) = (computed(100.), computed(1.));
+    assert!(
+        strong > 0.98 && (0.5..0.6).contains(&weak),
+        "{strong} {weak}"
+    );
     let mut expected = None;
-    for now in [0, 300 * DAY] {
-        clock.now.store(now, Ordering::SeqCst);
-        for semantics in [RetrievalSemantics::V1, current()] {
-            let mut q = metadata();
-            q.filter.min_strength = Some(0.6);
-            let out = engine.search_with_semantics(q, semantics).await.unwrap();
-            assert_eq!(out.response.results.len(), 1);
-            let r = &out.response.results[0];
-            assert_eq!((r.retrievability, r.effective_r), (0.8, 0.85));
-            let values = (r.memory_id, r.composite_score);
-            if let Some(expected) = expected {
-                assert_eq!(values, expected);
-            } else {
-                expected = Some(values);
-            }
+    for semantics in [RetrievalSemantics::V1, current()] {
+        // Unfiltered, both report the computed strength, not the stored 1.0.
+        let out = engine
+            .search_with_semantics(metadata(), semantics)
+            .await
+            .unwrap();
+        assert_eq!(result(&out, f.ids[0]).retrievability, strong);
+        assert_eq!(result(&out, f.ids[1]).retrievability, weak);
+        // minStrength drops the memory that decayed without a write.
+        let mut q = metadata();
+        q.filter.min_strength = Some(0.6);
+        let out = engine.search_with_semantics(q, semantics).await.unwrap();
+        assert_eq!(out.response.results.len(), 1);
+        let r = &out.response.results[0];
+        assert_eq!(
+            (r.memory_id, r.retrievability, r.effective_r),
+            (f.ids[0], strong, strong)
+        );
+        let values = (r.memory_id, r.composite_score);
+        if let Some(expected) = expected {
+            assert_eq!(values, expected);
+        } else {
+            expected = Some(values);
         }
     }
     assert_eq!(clock.calls.load(Ordering::SeqCst), 4);
@@ -1241,7 +1267,9 @@ async fn by_id_selected_phase_scope_or_missing_row_fails_before_observer() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn by_id_legacy_strength_and_cosine_values_ignore_clock_advancement() {
+async fn by_id_legacy_strength_follows_the_clock_and_cosine_values_do_not() {
+    // #239: stored strength is as of the last write, so a legacy-access get
+    // and similarity report the strength computed at their clock.
     let f = offline(2, LifecycleVersion::LegacyAccessV1, |_, r| {
         r.strength = 0.23;
         r.decay_strength = 0.67;
@@ -1254,6 +1282,11 @@ async fn by_id_legacy_strength_and_cosine_values_ignore_clock_advancement() {
         .prepare_similar_filtered(f.ids[0], 10, None, false)
         .await
         .unwrap();
+    let policy = crate::decay::lifecycle::EffectiveLifecyclePolicy {
+        config: Default::default(),
+        decay_rate_multiplier: 1.,
+    };
+    let mut previous = f32::MAX;
     for now in [DAY, 300 * DAY] {
         clock.now.store(now, Ordering::SeqCst);
         let fetched = engine
@@ -1261,7 +1294,13 @@ async fn by_id_legacy_strength_and_cosine_values_ignore_clock_advancement() {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!((fetched.strength, fetched.decay_strength), (0.23, 0.67));
+        let computed = crate::decay::lifecycle::project(0.01, 0, &policy, now, 0.)
+            .unwrap()
+            .strength;
+        assert_eq!(fetched.strength, computed);
+        assert!(fetched.decay_strength >= fetched.strength);
+        assert!(fetched.strength < previous);
+        previous = fetched.strength;
         let selected = engine
             .prepare_similar_filtered(f.ids[0], 10, None, false)
             .await
@@ -1272,7 +1311,8 @@ async fn by_id_legacy_strength_and_cosine_values_ignore_clock_advancement() {
                 (a.memory_id, a.score, a.composite_score),
                 (b.memory_id, b.score, b.composite_score)
             );
-            assert_eq!((a.retrievability, a.effective_r), (0.23, 0.67));
+            assert_eq!(a.retrievability, computed);
+            assert!(a.effective_r >= a.retrievability);
         }
     }
     assert_eq!(clock.calls.load(Ordering::SeqCst), 5);

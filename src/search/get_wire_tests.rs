@@ -453,6 +453,77 @@ async fn prepared_get_actual_native_only_projection_graph_is_required() {
     assert_eq!(bytes(&f.f), before);
 }
 
+// #239: a legacy-access point reports computed strength. With the graph view
+// ready it includes the connection bonus; while the view is stale it reports
+// the bonus-free projection instead of failing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prepared_get_legacy_point_without_ready_graph_reports_bonus_free_strength() {
+    let f = similar_fixture().await;
+    let now = 100 + 10 * 86_400_000;
+    // A real canonical edge, so the target has a connection bonus.
+    f.owner
+        .native_graph(
+            MutationContext::unkeyed(NamespaceId::new(1)),
+            crate::derived_completion::native_graph::GraphRequest::Explicit(
+                crate::storage::native_graph::NativeGraphInput {
+                    edges: vec![crate::storage::native_graph::NativeEdgeInput {
+                        source: f.terminal,
+                        target: f.live,
+                        edge_type: crate::model::EdgeType::Associative,
+                        weight: 1.0,
+                        auto_created: false,
+                    }],
+                },
+            ),
+            Default::default(),
+            Arc::new(crate::time::ManualClock::new(now)),
+            None,
+        )
+        .await
+        .unwrap();
+    let engine = f.engine.with_lifecycle_inputs(
+        Arc::new(crate::time::ManualClock::new(now)),
+        Default::default(),
+        1.0,
+    );
+    let record = f.f.record(f.terminal).unwrap();
+    let raw = crate::decay::lifecycle::project(
+        record.stability,
+        record.schema.as_ref().unwrap().lifecycle.decay_anchor_at,
+        &crate::decay::lifecycle::EffectiveLifecyclePolicy {
+            config: Default::default(),
+            decay_rate_multiplier: 1.,
+        },
+        now,
+        0.,
+    )
+    .unwrap();
+    assert!(raw.strength < 0.9, "{raw:?}");
+    let get = || {
+        engine.get_contract(
+            point_request(f.terminal, false),
+            crate::daemon::protocol::MAX_MESSAGE_SIZE,
+        )
+    };
+    let ready = get().await;
+    assert_eq!(ready.http_status, 200, "{ready:?}");
+    let ready = ready.envelope.data.unwrap().memory;
+    assert_eq!(ready.strength, raw.strength);
+    assert!(ready.decay_strength > raw.decay_strength, "{ready:?}");
+    f.f.storage
+        .read()
+        .unwrap()
+        .meta_store()
+        .invalidate_derived_view(crate::storage::publication::DerivedView::Graph);
+    let stale = get().await;
+    assert_eq!(stale.http_status, 200, "{stale:?}");
+    let stale = stale.envelope.data.unwrap().memory;
+    assert_eq!(
+        (stale.strength, stale.decay_strength),
+        (raw.strength, raw.decay_strength)
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prepared_get_actual_native_origins_one_exposure_and_terminal_no_policy_projection() {
     let f = similar_fixture().await;
