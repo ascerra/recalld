@@ -1918,6 +1918,7 @@ fn update_namespace_policy_def() -> ToolInfo {
             idempotent_hint: Some(true),
             open_world_hint: Some(false),
         }),
+        meta: None,
     }
 }
 
