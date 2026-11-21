@@ -2,10 +2,6 @@
 
 ## Unreleased
 
-### Changed
-
-- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
-
 ### Added
 
 - Change how fast memories decay in an existing namespace, `default` included (#237). The MCP tool `update_namespace_policy` and `recalld-cli namespaces policy NAME` take only the settings to change (multiplier, initial stability, phase thresholds, permastore threshold) and keep the rest; over HTTP, `PUT /namespaces/{id}/policy` now accepts contract 2, the only request that does. `namespace_stats` and `list_namespaces` report each namespace's `policy`, including the multiplier the sweep uses and `daysUntilSummary`/`daysUntilGhost` for a memory that is never recalled. Returning a namespace to the inherited multiplier now records the current `[decay]` value for it at once, instead of leaving operations blocked until an offline adoption.
@@ -13,6 +9,7 @@
 
 ### Local web UI
 
+- The memory map has a **Spacing** slider (1× to 3×) that spreads memories further apart. It scales link length, repulsion and the no-overlap distance together; each spacing keeps its own saved layout, and the choice is remembered.
 - Decay forecasts use the namespace's effective decay multiplier (its own, else the global one), as the decay sweep does: Explore's strength and **Next change**, the memory panel's decay curve, the Health forecast and at-risk list, and the map's Decay scrubber previously assumed a multiplier of 1. (#235)
 - The namespace menu in search (⌘K) opens above the search popup instead of behind it. Search starts from the page's namespace (All when none is set) and changing it there filters only the search, not every page.
 
@@ -26,6 +23,10 @@
 ### Deprecated
 
 - `[decay.phase_thresholds]` and `decay.permastore_threshold_days` (and `RECALLD_DECAY_FULL_TO_SUMMARY`, `RECALLD_DECAY_SUMMARY_TO_GHOST`, `RECALLD_DECAY_GHOST_TO_DELETE`, `RECALLD_DECAY_PERMASTORE_THRESHOLD_DAYS`) never had an effect: thresholds are set per namespace. They are still accepted, startup logs a `WARN` when they differ from the defaults, and they are gone from the sample config and the guide. (#233)
+
+### Changed
+
+- MCP server instructions now lead with when to use memory: recall relevant context at the start of a task, and before finishing substantial work store durable decisions, preferences and non-obvious gotchas that are not already in code, PRs or issues. `recall_memories` and `store_memory` carry `_meta["anthropic/alwaysLoad"]`, so Claude Code loads them without a tool search first.
 
 ## 2.1.2 — 2026-11-20
 
